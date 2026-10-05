@@ -2,14 +2,16 @@
 
 Plugin id `io.github.kennymcsimpson.governed-roundtable` · version 0.1.0 · [中文](README.zh-CN.md)
 
-> **Status: development build, not yet loaded in a real PI-Desktop.** Everything below was tested
-> only against a fake host that mirrors the upstream plugin SDK (see
-> [What is verified](#what-is-verified-and-what-is-not)). The real-app test (**Load dev plugin** /
-> **Install plugin package**) was deliberately not run yet: another PI build was being worked on on
-> the author's machine at the time. Two limits are by design, not open bugs: **PI seats are not
-> woken automatically** (no plugin API can wake a PI conversation from a background service; you
-> tell the conversation to continue), and **hosted seats are discussion-only** (one text-only
-> `agent.complete` call per turn, no tools).
+> **Status: tested against a fake host that mirrors the upstream plugin SDK, and in the official
+> PI-Desktop 0.16.1 portable build** with a stub model: Load dev plugin, the permission review, the
+> command palette, the panel, the `Room` tool in a conversation, a full round with a hosted seat, and
+> Install plugin package (see [What is verified](#what-is-verified-and-what-is-not)). Not tested
+> yet: a real model, and external agents joining a room served in the real app. Two limits are by
+> design, not open bugs:
+> - **PI seats are not woken automatically.** No plugin API can wake a PI conversation from a
+>   background service, so you tell the conversation to continue.
+> - **Hosted seats are discussion-only.** They get one text-only `agent.complete` call per turn,
+>   with no tools.
 
 This plugin brings room-dev's governed room into upstream
 [PI-Desktop](https://github.com/vastsa/PI-Desktop) using only the public plugin APIs. It needs no
@@ -39,10 +41,12 @@ Whether the governance layer catches failures that manual forwarding misses has 
 |---|---|---|
 | **Room host** (resident service `room-host`) | `contributes.services`, `pi.services.register`, permission `background.service` | Runs room-dev's room service (`lib/api.mjs` `openRoom`) for each room you serve. It also serves the loopback room UI on `127.0.0.1` and keeps `service.lock` fresh. When the service stops, every room it served is closed and `service.lock` is removed. Rooms you were serving are served again when the service next starts. |
 | **Room tool** (Agent tool `Room`, risk high) | `pi.agent.registerTool`, `agent.tool.register` | Lets a PI conversation `list` rooms, `create` a room, `join` a PI seat, and use **its own seat**: `wait`, `submit`, `pass`, `point`, `quote`, `misquoted`, `mark`, `verdict`, `disclose`, `assign`, `artifacts`, `status`, `leave`. |
-| **Panel** and command `Governed Roundtable: Open panel` | `ui.panel`, `pi.commands.register`, `onPanelInvoke` | Your side of the room. Lists rooms with their seats and bindings. Serves or stops a room. Sets the task and starts a round. Sends a user message, and handles retry and skip. Approves or denies disclosures, accepts stale verdicts, closes the room, and releases a seat binding. |
+| **Panel** and command `Governed Roundtable: Open panel` | `ui.panel`, `pi.commands.register`, `onPanelInvoke` | Your side of the room. Lists rooms with their seats and bindings. Serves or stops a room. Sets the task and starts a round. Sends a user message, and handles retry and skip. Approves or denies disclosures, accepts stale verdicts, closes the room, and releases a seat binding. A closed room is read-only there: no serve, stop or room-UI button, and its Release asks for a second click, because the conversation reads the farewell through its binding. |
 | **Room UI in the browser** | `pi.shell.openExternal`, permission `shell.openExternal` | Opens room-dev's full room UI (`http://127.0.0.1:<port>/#<admin token>`) in your system browser. |
 | **Hosted seats** (lane `pi-complete`) | `pi.agent.complete`, permission `agent.complete` | A text-only seat that speaks through a model you have configured in PI-Desktop: one completion per turn, with no tools. It plugs into room-dev as a `hostedProviders.lane` factory. |
-| **Turn toast** | `pi.ui.showToast` (needs no permission) | When a seat that waits manually gets its turn, you get one toast per attempt. |
+| **Turn toast** | `pi.ui.showToast` (needs no permission) | When a seat that waits manually gets its turn, you get one toast per attempt, in the host's language (Chinese for any `zh` locale, else English): the plugin reads `pi.app.getLocale` again for each toast and follows `appearance:changed` on `pi.events`. |
+
+A PI seat's packets describe only Room tool calls (the model sees `plugin_io_github_kennymcsimpson_governed_roundtable_Room`), never room-dev command lines; a hosted seat's packets describe only the ASCII markers it writes into its reply.
 
 External agents (Codex, Claude Code, OpenCode, Gemini CLI, …) join exactly as they do with
 room-dev: the room writes a `JOIN.md` for each seat, and the agent runs the vendored
@@ -76,8 +80,8 @@ Not requested: `desktop.control`, `net.fetch`, `fs.*`, `clipboard.*`, `agent.pro
 | Hosted seat (lane `pi-complete`) | its packet (task, other seats' words) | one `pi.agent.complete` call per turn to **your configured model** (uses your model quota) | `agent.complete` | the user starts the round | ≤ 200,000 chars per packet, system prompt ≤ 32 KiB, host rate limit 8 / 60 s, `tools: []`, no session context | — |
 | Panel `roundtable/*` channels | room state | admin commands to the served room (allowlist `task, start, say, close, skip, retry, approve-disclose, deny-disclose, accept-stale`) | `ui.panel` | a click in the panel | unknown commands refused (`UNKNOWN_CMD`) | close stops serving the room |
 | Panel "Open room UI" | the room's admin token | the system browser via `pi.shell.openExternal` | `shell.openExternal` | a click | loopback URL only; the token is in the URL fragment (local browser history may keep it) | — |
-| Turn toast | seat and room id | `pi.ui.showToast` | none | — | one toast per attempt of a manually waiting seat | — |
-| Plugin state | — | `roundtable.json` in `pi.plugin.getDataPath()` (seat bindings with session ids, rooms to serve again) | none | — | plugin-private | release a binding in the panel |
+| Turn toast | seat and room id; the host language (`pi.app.getLocale`, `appearance:changed`) | `pi.ui.showToast` | none | — | one toast per attempt of a manually waiting seat | the `appearance:changed` listener is removed on unload |
+| Plugin state | — | `roundtable.json` in `pi.plugin.getDataPath()` (seat bindings with session ids, rooms to serve again) | none | — | plugin-private | release a binding in the panel (on a closed room, with a second click) |
 | Codex wake push (room-dev) | a room's registered wake | room-dev's `codex queue` child process | — | only for rooms whose seats registered a wake **outside** this plugin | the Room tool never registers a wake | — |
 | Native-log audit and wake idle check (room-dev) | that agent's own session logs, read-only: Codex under `%USERPROFILE%\.codex`, Claude Code under `%USERPROFILE%\.claude\projects` | audit results into the room's event log | — | only for seats registered **outside** this plugin with an audit source or a Codex wake thread | read-only; seats created through the Room tool register neither | — |
 | Reviewer verdict record (room-dev) | an authorized reviewer verdict | one appended line in `%USERPROFILE%\room-dev\adjudications.jsonl` (room id, reviewer agent kind, preset, verdict, artifact hash, annotation) | — | a reviewer seat's verdict | append-only, through room-dev's single-file guard | — |
@@ -224,13 +228,15 @@ and review the five permissions (`ui.panel`, `agent.tool.register`, `background.
 ## What is verified and what is not
 
 Verified on the author's Windows 11 machine with Node 24.11.1, by
-`integrations/pi-desktop-plugin/test/plugin.test.mjs` (15 tests), `test/panel.test.mjs` (4 tests)
-and `test/manifest.test.mjs` (5 tests: the marketplace manifest, panel and README requirements).
+`integrations/pi-desktop-plugin/test/plugin.test.mjs` (16 tests), `test/panel.test.mjs` (25 tests),
+`test/locale.test.mjs` (8 tests: the turn toast's language) and `test/manifest.test.mjs` (6 tests:
+the marketplace manifest, panel and README requirements).
 The fake host (`test/fake-pi-host.mjs`) reproduces the upstream `buildApi()` shapes, init order,
 service start and stop, the tool context (the `ctx` fields, and the invocation scope: `execute` runs
 in an `AsyncLocalStorage` invocation and a `pi.*` call from a finished invocation's context is
-rejected with `PLUGIN_TOOL_ABORTED`), panel routing, permission checks and the `agent.complete`
-limits, and cites the upstream lines for each. It runs in one Node process: the broker side of the
+rejected with `PLUGIN_TOOL_ABORTED`), panel routing, permission checks, the `agent.complete`
+limits, and host events with the boot order of the locale (`pi.events`; a plugin restored at boot
+reads `en`, then the stored language is applied and `appearance:changed` is pushed), and cites the upstream lines for each. It runs in one Node process: the broker side of the
 invocation check, cancellation messages and the real IPC are not modelled. With it, the tests check:
 
 - `build.mjs --source head` copies the committed bytes and records the HEAD commit;
@@ -245,6 +251,9 @@ invocation check, cancellation messages and the real IPC are not modelled. With 
   `seat_failed rate_limited`;
 - the panel works: the room UI URL goes to `openExternal`, a binding is released, the room is
   closed and the farewell handed over;
+- a pi-user seat without the Room tool surface (a room made by the 0.1.0 plugin) that a
+  conversation already holds still shows in the panel as a PI seat with its binding and Release,
+  gets the PI-conversation toast, and once released is not offered to a conversation again;
 - a room the user stopped is not served again by a tool call (`NOT_SERVED`) until the panel serves
   it;
 - with a rooms root whose path contains a space, `wait` hands over the packet and the farewell;
@@ -256,30 +265,75 @@ invocation check, cancellation messages and the real IPC are not modelled. With 
 - a room with room-dev's built-in Pi seat, served by the plugin, never reads room-dev's saved Pi key
   (room-dev's own default, run as a control in the same test, does);
 - the panel takes its language from the host's `app.getAppearance` (`zh-CN` → 开始一轮), falls
-  back to `navigator.language`, and follows `appearance:changed`.
+  back to `navigator.language`, and follows `appearance:changed`;
+- the panel keeps polling while the user types: the detail is updated in place, so the focused
+  control keeps its node, text, caret and IME composition, and typed text survives a rebuild; polls
+  never stack, a late answer is dropped (Hide wins), a two-click confirm survives a poll, a failed
+  poll's error clears while an action's error stays, and failed actions keep their text; a late
+  rooms answer is dropped, and a room that closes drops its drafts and armed confirms (an armed
+  Release stays); the fake document blurs a focused control that is detached and does not focus a
+  detached or hidden one;
+- a closed room in the panel has no serve, stop or room-UI button, a read-only detail, and a
+  Release that asks twice; a room another app serves has no serve button; Start round is disabled
+  while a round runs; the status line and phase names follow the language; serve, admin and
+  open-ui on a closed room answer `ROOM_CLOSED`, and the panel shows `ROOM_CLOSED`, `SERVED_ELSEWHERE`
+  and `NOT_SERVED_HERE` in its own language; a stopped room's hint names Serve here only while the
+  service runs;
+- the turn toast follows the host language: Chinese when the plugin was restored at boot under `en`
+  and the stored `zh-CN` was applied afterwards; a later switch to English is followed; with no
+  event, the per-toast `getLocale` read still finds the language; malformed `appearance:changed`
+  payloads and a failing `getLocale` keep the last good language; the listener is removed on
+  unload and when `onLoad` fails (and a registered tool with it), and neither the read nor the toast runs in a finished tool invocation.
 
 The upstream marketplace scripts were run on the built folder and on the packed `.piplug`:
 0 blockers, 58 manual-review signals (each one is justified in the submission's description; a passing
 audit is not an approval).
 
-**Not verified.** None of the following has been run. The real-app test needs a running
-PI-Desktop, and it was deliberately not run on the author's machine while another PI build was being
-worked on there; it is the next step before this plugin is offered for review as ready.
+**Verified in the real app.** The official `PI-Desktop-Portable-0.16.1.zip` was driven with
+trusted CDP clicks and the app's MCP control plane. The profile was a throw-away one:
+`PI_DESKTOP_DATA_DIR`, `PI_DESKTOP_AGENTS_DIR`, `HOME`, `USERPROFILE` and `--user-data-dir` all
+pointed into it. The model was a local stub. `PI_DESKTOP_AGENTS_DIR` matters: without it host-core
+reads the real home's `.agents` and starts the MCP servers registered there.
 
-- loading the plugin in the real app (**Load dev plugin** or **Install plugin package**), including
-  the install dialog, the permission grant and the forced tool prefix `plugin_<id_safe>_Room`;
-- `main.js` (CommonJS) importing the ESM `core.mjs` inside Electron's `utilityProcess`;
-- room-dev's HTTP server and timers running in that process;
-- the real `ctx.sessionId` values;
-- toasts from a service;
-- whether `shell.openExternal` keeps the URL fragment that carries the admin token on Windows.
-  room-dev's own launcher uses `rundll32 url.dll,FileProtocolHandler` because `start` and
-  `explorer.exe` can drop it. If the fragment is lost, the browser page has no admin token, and
-  the panel is the place to administer;
-- a real model behind `agent.complete`;
+- **Load dev plugin.** The menu item opens a folder picker and then the permission review, which
+  lists the five permissions by risk. After loading, the plugin is `ready` and its service is
+  `running`.
+- **Restore at boot.** After an app restart the plugin is restored, and the turn toast is in the
+  host's language: "圆桌 …：轮到席位 pi1 …" under a `zh-CN` UI. This fixes the English toast an
+  earlier build showed.
+- **Command palette.** The **Governed Roundtable: Open panel** entry opens the panel window. The
+  panel follows the host language, and its status line and phase names are localized.
+- **Tool name and approval.** The model sees the tool as
+  `plugin_io_github_kennymcsimpson_governed_roundtable_Room`. It is deferred, so the model
+  activates it through `ToolSearch`, and the host shows its high-risk approval card.
+- **create.** A room created through the tool binds seat `pi1` to the conversation's session id.
+  The seat is recorded with surface `tool` and that same tool name.
+- **Host validation.** A forged `sessionId` field and the non-tool action `start` are rejected by
+  the host's own schema validation before the plugin runs.
+- **A full round.** The PI seat's packet names only Room tool calls and contains no `room.mjs` or
+  `--seat` line. The hosted seat's request through the host's real `agent.complete` names only the
+  ASCII markers, and the forged `authority=user` block in it is escaped inside an
+  `authority=none` block. After that the summary is published and the round ends.
+- **The panel while typing.** With focus and typed text in a panel input, the event list kept
+  updating, and the text stayed.
+- **Closing and releasing.** **Close room** and a closed room's **Release** each need a second
+  click. A closed room shows a read-only detail with no serve, stop or room-UI button.
+- **Install plugin package.** Installing the `.piplug` gives an installed tree byte-identical to
+  the built folder, the service running, and the panel opening.
+
+**Not verified.**
+
+- whether `shell.openExternal` keeps the URL fragment that carries the admin token on Windows (the
+  button was not clicked, because it opens the machine's default browser). room-dev's own launcher
+  uses `rundll32 url.dll,FileProtocolHandler` because `start` and `explorer.exe` can drop it. If the
+  fragment is lost, the browser page has no admin token, and the panel is the place to administer;
+- the permission-denied paths in the real app (all five permissions were granted; they are tested
+  against the fake host);
+- a real model behind the conversation or `agent.complete`;
+- external agents (Codex, Claude Code) joining a room that the real app serves;
 - crash restart with a stale lock;
 - whether the 5 s start budget is met with many remembered rooms;
-- the panel's look and behaviour in the host window.
+- typing with an IME in the real panel (the fake DOM covers composition events).
 
 **Known limits:**
 
@@ -301,14 +355,14 @@ worked on there; it is the next step before this plugin is offered for review as
 - A room already served by another program (the room-dev desktop app or CLI) is administered
   there.
 
-**Marketplace readiness:** not yet submitted. The plugins repository's CONTRIBUTING asks
+**Marketplace readiness:** submitted as a draft pull request. The plugins repository's CONTRIBUTING asks
 high-risk plugins (background services, process execution and file writes all count) for a
 capability / data-flow matrix (above), negative-path tests and two independent maintainer
 approvals. The negative-path tests for the submission live in that repository's
 `tests/governed-roundtable.test.mjs`: forged session ids refused, administration unreachable from
 the tool, undeclared or ungranted permissions failing cleanly, service stop releasing the room
-lock, and packets keeping their provenance banners. The real-app load test is still open (see
-above).
+lock, and packets keeping their provenance banners. The real-app test is described above. The
+submission is a draft pull request.
 
 ## License
 

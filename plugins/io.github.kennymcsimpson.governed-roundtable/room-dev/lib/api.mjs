@@ -76,7 +76,8 @@ export async function createRoom(params) {
   return { ...r, roomDir: r.fields.dir ? path.resolve(r.fields.dir) : null };
 }
 
-// addSeat({dir, seat, role, agent, wait, cwd, hosted, tier, reviews, audit, 'thread-id', 'session-id', 'wake-thread', name}) -> result
+// addSeat({dir, seat, role, agent, wait, cwd, hosted, surface, tier, reviews, audit, 'thread-id', 'session-id', 'wake-thread', name}) -> result
+//   surface: 'tool:<model-visible tool name>' for a host conversation that acts only through that tool (INTERFACES §5a)
 // The service must not be running (the CLI rule); add seats before openRoom().
 export async function addSeat(params) {
   const r = await admin('add-seat', params);

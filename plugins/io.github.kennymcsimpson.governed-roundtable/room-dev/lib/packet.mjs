@@ -4,16 +4,20 @@
 // declaration line) + current summary block + material blocks + item table (summary round)
 // + superseded notice + void notice + this turn's task. Every block carries the packet's random
 // nonce; any '[ROOM:' / '[/ROOM:' inside forwarded text is escaped and counted.
-// All per-phase / per-role prose comes from lib/templates/*.md, loaded once; the sha256 of the
+// The per-phase and per-role prose comes from lib/templates/*.md, loaded once. The sha256 of the
 // concatenated templates is the manifest's templateHash. Templates only ever go into packets.
+// They are written for command-line seats. For a tool or hosted seat (lib/surface.mjs), the
+// command lines are replaced by that surface's fragments, and the manifest adds surface and surfaceHash.
 // This module is pure apart from reading its own template files.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fwd, sha256 } from './common.mjs';
 import { trimMessages, computePins, mergeDropped, describeDropped } from './budget.mjs';
+import { seatSurface, surfaceText, SURFACE_LINES, SURFACE_HASH } from './surface.mjs';
 
-// Bump when the packet layout changes in a way that makes two packets with equal inputs differ.
+// Bump when the packet layout changes in a way that makes two packets with equal inputs differ
+// (non-cli surfaces are versioned by the manifest's surfaceHash).
 export const RENDER_VERSION = 2;
 
 export const TEMPLATE_NAMES = [
@@ -26,7 +30,7 @@ export const TEMPLATE_NAMES = [
 export const TEMPLATE_VARS = [
   'roomId', 'seatId', 'seatName', 'role', 'roleName', 'phase', 'phaseName', 'roundId', 'turn', 'turnTotal',
   'attemptId', 'packetId', 'nonce', 'deadline', 'roomCmd', 'seatDir', 'cwd', 'executorCwds', 'declaredTier',
-  'waitMode', 'voidedAttemptId', 'oldVersion', 'newVersion', 'summaryVersion',
+  'waitMode', 'voidedAttemptId', 'oldVersion', 'newVersion', 'summaryVersion', 'toolName',
 ];
 
 const ROLE_NAMES = { lead: '主力', reviewer: '审方', executor: '执行者', participant: '参与者' };
@@ -183,6 +187,10 @@ export function renderPacket(input) {
   const artifacts = Array.isArray(input.artifacts) ? input.artifacts : [];
   const allMessages = [...(Array.isArray(state.messages) ? state.messages : [])].sort((a, b) => seqNum(a.seq) - seqNum(b.seq));
   const vars = buildVars({ room, seat, seatDir, state, attempt, nonce, roomCmd, summary });
+  const surface = seatSurface(seat);
+  vars.toolName = surface.kind === 'tool' ? surface.tool : '';
+  const fillT = (name, extra) => fillTemplate(surfaceText(name, T[name], surface.kind), extra ? { ...vars, ...extra } : vars);
+  const roleTpl = T[`role-${seat.role}`] ? `role-${seat.role}` : 'role-participant';
   const phase = vars.phase;
   const roundMessages = allMessages.filter((m) => m.roundId == null || Number(m.roundId) === Number(state.roundId));
   const firstInRound = roundMessages.length === 0;
@@ -197,7 +205,7 @@ export function renderPacket(input) {
     L.push('');
 
     // 1. room preamble + role
-    const pre = [fillTemplate(T.preamble, vars), fillTemplate(T[`role-${seat.role}`] || T['role-participant'], vars)];
+    const pre = [fillT('preamble'), fillT(roleTpl)];
     if (artifacts.length) {
       pre.push('待审产物（冻结清单）：');
       for (const a of artifacts) pre.push(`- 席位 ${a.seatId} 清单 ${a.manifestSha}${a.fileCount != null ? `（${a.fileCount} 个文件${a.bytes != null ? `，${a.bytes} 字节` : ''}）` : ''}`);
@@ -238,7 +246,7 @@ export function renderPacket(input) {
     }
     if (dropped.length) {
       L.push('');
-      L.push(roomBlock(nonce, `预算裁剪：${describeDropped(dropped)} 的发言因包超过预算未包含在本包（以整条消息为单位，旧的先丢）；当轮发言、被引用的发言与当前汇总已钉住。需要时用  ${roomCmd} status --seat ${vars.seatDir} --log  查看。`));
+      L.push(roomBlock(nonce, `预算裁剪：${describeDropped(dropped)} 的发言因包超过预算未包含在本包（以整条消息为单位，旧的先丢）；当轮发言、被引用的发言与当前汇总已钉住。${surface.kind === 'cli' ? `需要时用  ${roomCmd} status --seat ${vars.seatDir} --log  查看。` : SURFACE_LINES[surface.kind].dropped}`));
       blocks.push({ seat: 'room', authority: 'room', seq: 0, hash: null });
     }
     L.push('');
@@ -286,7 +294,7 @@ export function renderPacket(input) {
       L.push('## 取代通知');
       L.push('');
       blocks.push({ seat: 'room', authority: 'room', seq: 0, hash: null });
-      L.push(roomBlock(nonce, fillTemplate(T['superseded-notice'], { ...vars, oldVersion: sn.oldVersion, newVersion: sn.newVersion })));
+      L.push(roomBlock(nonce, fillT('superseded-notice', { oldVersion: sn.oldVersion, newVersion: sn.newVersion })));
       L.push('');
     }
 
@@ -295,12 +303,12 @@ export function renderPacket(input) {
       L.push('## 作废声明');
       L.push('');
       blocks.push({ seat: 'room', authority: 'room', seq: 0, hash: null });
-      L.push(roomBlock(nonce, fillTemplate(T['void-notice'], { ...vars, voidedAttemptId: input.voidNotice.attemptId })));
+      L.push(roomBlock(nonce, fillT('void-notice', { voidedAttemptId: input.voidNotice.attemptId })));
       L.push('');
     }
 
     // 10. this turn's task
-    const task = [fillTemplate(T[phaseTemplateName(phase, { role: seat.role, firstInRound })], vars)];
+    const task = [fillT(phaseTemplateName(phase, { role: seat.role, firstInRound }))];
     if (attempt.turnTask) task.push('', `分派给你的任务：`, esc(attempt.turnTask));
     L.push('## 本回合任务');
     L.push('');
@@ -362,6 +370,7 @@ export function renderPacket(input) {
     itemIds: items.map((it) => it.itemId),
     voidedAttemptId: input.voidNotice && input.voidNotice.attemptId ? input.voidNotice.attemptId : null,
     supersededNotice: input.supersededNotice ? { oldVersion: input.supersededNotice.oldVersion, newVersion: input.supersededNotice.newVersion } : null,
+    ...(surface.kind === 'cli' ? {} : { surface: surface.kind, surfaceHash: SURFACE_HASH[surface.kind] }),
   };
   return { text, manifest };
 }
@@ -374,15 +383,17 @@ export function renderPacket(input) {
 export function renderFarewell({ room, seat, nonce, roomCmd = 'room', packetId, templates } = {}) {
   if (!room || !seat || !nonce) throw new Error('renderFarewell: room, seat and nonce are required');
   const tpl = templates || loadTemplates();
+  const surface = seatSurface(seat);
   const vars = {
     roomId: room.id, seatId: seat.seatId, seatName: seat.name || seat.seatId, role: seat.role,
     roleName: ROLE_NAMES[seat.role] || seat.role, nonce, roomCmd, cwd: safeFwd(seat.cwd),
+    toolName: surface.kind === 'tool' ? surface.tool : '',
   };
   const id = packetId || `farewell-${room.id}-${seat.seatId}-${nonce}`;
   const L = [];
   L.push(`# 房间 ${room.id} · 散会声明 ${id}`);
   L.push('');
-  L.push(roomBlock(nonce, fillTemplate(tpl.templates.farewell, vars)));
+  L.push(roomBlock(nonce, fillTemplate(surfaceText('farewell', tpl.templates.farewell, surface.kind), vars)));
   L.push('');
   const text = L.join('\n');
   return {
@@ -395,6 +406,7 @@ export function renderFarewell({ room, seat, nonce, roomCmd = 'room', packetId, 
       declaredTier: seat.declaredTier || null, auditSource: seat.audit && seat.audit.kind ? seat.audit.kind : null,
       hostOutputLimit: null, escaped: 0, prevManifestId: null, dropped: [],
       blocks: [{ seat: 'room', authority: 'room', seq: 0, hash: null }],
+      ...(surface.kind === 'cli' ? {} : { surface: surface.kind, surfaceHash: SURFACE_HASH[surface.kind] }),
     },
   };
 }

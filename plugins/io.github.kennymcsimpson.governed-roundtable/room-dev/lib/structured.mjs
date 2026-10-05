@@ -517,11 +517,14 @@ export function checkResolvedVerdicts(verdicts = []) {
 }
 
 // The one follow-up the service may send for a malformed submission (plan §4.5: ask once).
-export function malformedFollowUp({ reasons = [], attemptId, retriesLeft = MALFORMED_RETRIES } = {}) {
+// `resubmit` is the line naming how to resubmit: the service passes surfaceLine(seatSurface(seat),
+// 'resubmit') (lib/surface.mjs), and undefined means the CLI line.
+const RESUBMIT_CLI = '请只用原样 ASCII 标记或 room 子命令重新提交；标记示例：<<ROOM:VERDICT pass artifact=<manifestSha>>>、<<ROOM:PASS>>。';
+export function malformedFollowUp({ reasons = [], attemptId, retriesLeft = MALFORMED_RETRIES, resubmit = RESUBMIT_CLI } = {}) {
   const lines = [];
   lines.push(`结构化提交无法解析（attempt=${attemptId || '-'}），本回合追问一次。`);
   for (const r of reasons) lines.push(`- ${r.code}：${r.text || REASON_TEXT[r.code] || ''}`);
-  lines.push('请只用原样 ASCII 标记或 room 子命令重新提交；标记示例：<<ROOM:VERDICT pass artifact=<manifestSha>>>、<<ROOM:PASS>>。');
+  lines.push(resubmit);
   lines.push(retriesLeft > 0
     ? `还可以更正 ${retriesLeft} 次；再次失败将按 verdict=none 交给用户处理，房间不会默认记为 pass。`
     : '追问次数已用完；本回合 verdict 记为 none，交给用户处理，房间不会默认记为 pass。');

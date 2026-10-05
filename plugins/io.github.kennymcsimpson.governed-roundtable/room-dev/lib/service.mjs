@@ -22,6 +22,7 @@ import { ROOM_FILES as F, OUTBOX_FILES as O, sha256, randomHex, readJson, sleep,
 } from './common.mjs';
 import { createGuard } from './guard.mjs';
 import { seatRoomCmd } from './join.mjs';
+import { seatSurface, surfaceLine } from './surface.mjs';
 import { renderPacket, renderFarewell, escapeMarkers, loadTemplates, block } from './packet.mjs';
 import readline from 'node:readline';
 import { findCodex, codexHome } from './codex.mjs';
@@ -1574,7 +1575,8 @@ export function createRoomService(opts = {}) {
     if (state.followUp && !state.followUp.issued) {
       if (paused()) return;
       const fu = state.followUp;
-      issue(fu.seatId, fu.phase, { kind: 'followup', followUpOf: fu.forAttemptId, followUpText: malformedFollowUp({ reasons: fu.reasons, attemptId: fu.forAttemptId, retriesLeft: 1 }) });
+      const followUpText = malformedFollowUp({ reasons: fu.reasons, attemptId: fu.forAttemptId, retriesLeft: 1, resubmit: surfaceLine(seatSurface(seatOf(fu.seatId)), 'resubmit') });
+      issue(fu.seatId, fu.phase, { kind: 'followup', followUpOf: fu.forAttemptId, followUpText });
       return;
     }
     if (state.followUp) return; // the follow-up attempt is live
@@ -1839,8 +1841,15 @@ export async function codexThreadIdle(threadId, { home } = {}) {
 // (936 on a Chinese system), so a non-ASCII image name such as 圆桌 would come back as mojibake and
 // never match the lock. The name is therefore sent as base64 of its UTF-8 bytes ("b64:<...>"), which
 // is ASCII in every code page; the start time is ASCII already.
+// The script calls .NET directly and no cmdlet. Measured on a GitHub Actions windows-latest runner
+// (CI run 37261907203): with Get-Process this probe hit the 15 s timeout; every PowerShell child there
+// that called a cmdlet (Get-Process, Add-Type, Get-CimInstance) took 15-40 s, while two cmdlet-free
+// children through the same spawnClean finished within 1.8 s (seat.test W3). Inferred, not measured:
+// the cost is cmdlet discovery (module autoload) under spawnClean's whitelist environment.
+// A pid that is not running prints NO_PROCESS and exits LOCK_PROBE_GONE_EXIT.
+export const LOCK_PROBE_GONE_EXIT = 3;
 export function lockProbeScript(pid) {
-  return `$p = Get-Process -Id ${Number(pid)} -ErrorAction Stop; 'b64:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p.ProcessName)) + '|' + $p.StartTime.ToUniversalTime().ToString('o')`;
+  return `$p = $null; try { $p = [System.Diagnostics.Process]::GetProcessById(${Number(pid)}) } catch { $x = $_.Exception; while ($null -ne $x.InnerException) { $x = $x.InnerException }; if ($x -is [System.ArgumentException]) { [Console]::Out.Write('NO_PROCESS' + [char]10); exit ${LOCK_PROBE_GONE_EXIT} }; throw }; 'b64:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p.ProcessName)) + '|' + $p.StartTime.ToUniversalTime().ToString('o')`;
 }
 // "b64:<base64 utf-8 name>|<start>" (or a plain "<name>|<start>") -> [name, start].
 export function parseLockProbeOutput(stdout) {
@@ -1868,6 +1877,7 @@ export async function probeLockHolder(lock, { spawn = spawnClean, isAlive = pidA
     r = await spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', lockProbeScript(lock.pid)], { timeoutMs: 15_000, maxOutputBytes: 4096 });
   } catch { return 'unknown'; }
   if (!r || r.spawnError || r.timedOut) return 'unknown';
+  if (r.code === LOCK_PROBE_GONE_EXIT && /(?:^|\n)NO_PROCESS\r?\n/.test(String(r.stdout || ''))) return 'stale';
   if (r.code !== 0) return /Cannot find a process|找不到/.test(String(r.stderr || '')) ? 'stale' : 'unknown';
   const [name, started] = parseLockProbeOutput(r.stdout);
   if (name === null) return 'unknown';

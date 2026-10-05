@@ -32,6 +32,7 @@
 //                                   [--agent claude-code|codex-desktop|codex-cli|opencode|gemini-cli|kimi|dsh|pi-user|generic]
 //                                   [--wait background|turn_over|manual] [--tier discussion|readonly|workspace|full]
 //                                   [--reviews A,B] [--hosted pi:discussion|pi:exec|pi:reviewer]
+//                                   [--surface cli|tool:<model-visible tool name>]
 //                                   [--wake-thread <codex thread>] [--wake-max n] [--audit codex|claude --thread-id <id> --session-id <id>]
 //                                   [--name ..] [--wall s] [--wait-timeout s]
 //     node room.mjs admin set-audit --dir <roomDir> --seat <id> --kind codex|claude [--thread-id <id>] [--session-id <id>]

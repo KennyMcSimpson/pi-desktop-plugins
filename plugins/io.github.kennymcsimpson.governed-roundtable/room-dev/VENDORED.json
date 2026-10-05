@@ -1,8 +1,8 @@
 {
- "roomDevCommit": "6123f216ee399d36b11e5613e88d22cca12c3e38",
+ "roomDevCommit": "57f17e5553849b0da2b1a5b3b8440026621dc3af",
  "source": "head",
  "dirtyAtBuild": [],
- "builtAt": "2026-10-05T03:58:29.398Z",
+ "builtAt": "2026-10-05T16:34:07.532Z",
  "files": [
   {
    "path": "LICENSE",
@@ -11,8 +11,8 @@
   },
   {
    "path": "lib/admin.mjs",
-   "bytes": 50841,
-   "sha256": "3b730e0e91e5f57e7f16a562b23d0b1cc67a746e28893ae05b34d6d0b2c34fb2"
+   "bytes": 51612,
+   "sha256": "d257f97cbe12661c65f1c9120c6c03485e9fc578eb2ad8b65850200f6b5ce71e"
   },
   {
    "path": "lib/api.d.mts",
@@ -21,8 +21,8 @@
   },
   {
    "path": "lib/api.mjs",
-   "bytes": 9898,
-   "sha256": "d29e3d4c2a0f6cdcca7aeee6e7ae6009fd7328507b6b03ca7cfe9630d9145139"
+   "bytes": 10029,
+   "sha256": "c3d92b46aa9050d34f3ef19cd38f183dd549265273f7751a338c1add103e9862"
   },
   {
    "path": "lib/audit.mjs",
@@ -81,8 +81,8 @@
   },
   {
    "path": "lib/packet.mjs",
-   "bytes": 20389,
-   "sha256": "e4c528fa01d80ffcbce9f594f5e933871e5a7c1cfe228ed9700913795835a9b8"
+   "bytes": 21366,
+   "sha256": "129cf47fe261e4df481fe6a8667db28230f552cc636871e08103dfd94eb03b4e"
   },
   {
    "path": "lib/reducer.mjs",
@@ -91,13 +91,13 @@
   },
   {
    "path": "lib/seat.mjs",
-   "bytes": 34892,
-   "sha256": "c6fd3ec41ac87f40e5484d54d16e2fe13c13736a56804d7dda4c0bf132408965"
+   "bytes": 35280,
+   "sha256": "f6b158b96973fa60ceed48590a6f4098445f8995c4c75a9b60e0581e9333e439"
   },
   {
    "path": "lib/service.mjs",
-   "bytes": 117981,
-   "sha256": "3f04004838d6794bb794c9eb2d375b5e67435865339190f5ad102919387b1b2e"
+   "bytes": 119114,
+   "sha256": "ad7d34de12ec219048104907a9147467367ccf538eb7152a5f43bbf66e8e1702"
   },
   {
    "path": "lib/spawn.mjs",
@@ -106,13 +106,18 @@
   },
   {
    "path": "lib/structured.mjs",
-   "bytes": 35939,
-   "sha256": "f876f90b83e68522f3da5cb810ec2247136b860ef9d74bee20e070de61dcbeaf"
+   "bytes": 36163,
+   "sha256": "499b19a39a1f6d93bc728f5b6a590cb6ac4a91338ffab9e40379a36f39860c48"
   },
   {
    "path": "lib/supervision.mjs",
    "bytes": 44558,
    "sha256": "74448e4b670f13a3b71101b20b8237f0e2d33e32bedd3af3f3f2338a39be91c5"
+  },
+  {
+   "path": "lib/surface.mjs",
+   "bytes": 13665,
+   "sha256": "d52908430d0344e76a57b80b8a621fc9f3d928c7e8d23fa5c55c8e6f714f3300"
   },
   {
    "path": "lib/templates/farewell.md",
@@ -196,8 +201,8 @@
   },
   {
    "path": "room.mjs",
-   "bytes": 10260,
-   "sha256": "80b24895c91adc5c99df50a896948d79d3f9b0ea7b0c802dbbfad3c8cc6e790f"
+   "bytes": 10344,
+   "sha256": "6f727096480a834fecd278005d8ff3ac005c59b2ebdf9ef3d34e89f048faeede"
   },
   {
    "path": "ui/app.css",

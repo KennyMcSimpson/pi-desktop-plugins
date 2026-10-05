@@ -20,6 +20,7 @@ import { accumulate, emptyUsage, formatUsage } from './usage.mjs';
 import { loadTemplates } from './packet.mjs';
 import { isCodexThreadId } from './audit.mjs';
 import { savePiKey, forgetPiKey, piKeyStatus, savedPiKeyPath, validatePiKey } from './hosted/dpapi.mjs';
+import { parseSurfaceArg } from './surface.mjs';
 
 export const ROOM_SCHEMA_VERSION = 2;
 export const PRESETS = Object.freeze(['implement-review', 'discussion', 'report', 'cross-check', 'division', 'simplified']);
@@ -315,6 +316,11 @@ export function cmdAddSeat(args, io) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/.test(m)) throw new CliError('--model <模型 id>：字母、数字和 . _ : / @ -，最长 128 个字符');
     hosted.model = m;
   }
+  // --surface (lib/surface.mjs): only a tool seat stores one; a hosted seat's reply is its submission.
+  const ps = parseSurfaceArg(args.surface);
+  if (ps.error) throw new CliError(ps.error);
+  const surface = ps.surface;
+  if (surface && hosted) throw new CliError('--surface 只用于不是托管的席位：托管席位的回复正文就是它的提交，房间按 ASCII 标记读它');
   const agent = hosted ? (hosted.kind === 'lane' ? 'hosted-lane' : 'hosted-pi') : (args.agent && args.agent !== true ? String(args.agent) : 'generic');
   if (!hosted && !AGENT_KIND_NAMES.includes(agent)) throw new CliError(`--agent ${AGENT_KIND_NAMES.join('|')}`);
   const waitMode = args.wait && args.wait !== true ? String(args.wait) : (hosted ? 'manual' : defaultWaitMode(agent));
@@ -364,8 +370,10 @@ export function cmdAddSeat(args, io) {
       : { enabled: false, maxPerTurn: wakeMax ?? 1 },
     audit: auditFrom(args, cwd, env),
     hosted,
+    ...(surface ? { surface } : {}),
     ...(reviews ? { reviews } : {}),
   };
+  if (surface && seat.wake.enabled && seat.wake.kind === 'codex-queue') throw new CliError('工具席位不能登记 Codex queue 唤醒（那条唤醒文案是一条命令行）；用 --wake-kind <宿主的唤醒种类>，或不登记唤醒');
   // No node on PATH but created by the desktop app (ROOM_SEAT_RUNTIME): the seat runs room.mjs on
   // the app's exe through its room.cmd (lib/join.mjs). With a node on PATH nothing is recorded.
   const runtime = hosted ? null : seatRuntimeFor({ env });
@@ -390,7 +398,7 @@ export function cmdAddSeat(args, io) {
   room.seats.push({ ...seat, joinSha256: sha256(joinMd) });
   guard.atomicWrite(path.join(roomDir, F.room), JSON.stringify(room, null, 1));
 
-  o.out(`SEAT ${seatId} role=${role} agent=${agent} wait=${waitMode} tier=${declaredTier} cwd=${fwd(cwd)}${hosted ? ` hosted=${hostedLabel(hosted)}` : ''}`);
+  o.out(`SEAT ${seatId} role=${role} agent=${agent} wait=${waitMode} tier=${declaredTier} cwd=${fwd(cwd)}${hosted ? ` hosted=${hostedLabel(hosted)}` : ''}${surface ? ` surface=tool:${surface.tool}` : ''}`);
   o.out(`JOIN ${fwd(path.join(seatDir, 'JOIN.md'))}`);
   o.out(`ROOMCMD ${fwd(path.join(seatDir, 'room.cmd'))}`);
   if (hosted && hosted.kind === 'lane') o.out(`这个席位由嵌入房间服务的宿主通过通道 ${hosted.lane} 托管；单独用命令行起的服务没有这个通道，轮到它时会记 HOSTED_PROVIDER_MISSING。`);

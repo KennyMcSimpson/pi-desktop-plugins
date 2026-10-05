@@ -2,7 +2,11 @@
 
 插件 id `io.github.kennymcsimpson.governed-roundtable` · 版本 0.1.0 · [English](README.md)
 
-> **状态：开发版，还没有装进真实的 PI-Desktop。** 下面所有能力只在一个仿照上游插件 SDK 写的假宿主上测过（见「已验证 / 未验证」）。真实应用里的测试（**Load dev plugin** / **Install plugin package**）是有意暂时没做的：当时作者机器上正在修另一个 PI 构建。有两条限制是设计使然，不是待修的缺陷：**PI 席位不会被自动唤醒**（没有任何插件接口能从后台服务唤醒 PI 对话，由你让那个对话继续）；**托管席位只做讨论**（每回合一次纯文本 `agent.complete`，不带工具）。
+> **状态：已在仿照上游插件 SDK 写的假宿主上测过，也在官方 PI-Desktop 0.16.1 便携版里用 stub 模型测过。** 真实应用里测过的有：Load dev plugin、权限审阅、命令面板、面板、对话里使用 `Room` 工具、带托管席位的完整一轮，以及 Install plugin package（见「已验证 / 未验证」）。还没测的是真实模型，以及外部 agent 加入由真实应用服务的房间。
+>
+> 有两条限制是设计使然，不是待修的缺陷：
+> - **PI 席位不会被自动唤醒。** 没有任何插件接口能从后台服务唤醒 PI 对话，需要你让那个对话继续。
+> - **托管席位只做讨论。** 每回合只有一次纯文本 `agent.complete`，不带工具。
 
 这个插件只用上游 [PI-Desktop](https://github.com/vastsa/PI-Desktop) 公开的插件接口，把 room-dev 的受治理房间带进 PI-Desktop，不改宿主、不改核心。房间引擎就是 room-dev 本身，原样内置在插件目录的 `room-dev/` 里（提交号记在 `room-dev/VENDORED.json`），在插件自己的进程里运行。
 
@@ -12,10 +16,12 @@
 |---|---|---|
 | 房间宿主（常驻服务 `room-host`） | `contributes.services`、`pi.services.register`、权限 `background.service` | 为你服务的每个房间运行 room-dev 的房间服务（`lib/api.mjs` 的 `openRoom`），并在 `127.0.0.1` 上提供房间界面、维持 `service.lock` 心跳。服务停止时关闭它服务的所有房间并删除 `service.lock`；下次启动时重新服务之前在服务的房间。 |
 | Room 工具（Agent 工具，风险 high） | `pi.agent.registerTool`、`agent.tool.register` | PI 对话可以 `list` 看房间、`create` 建房、`join` 认领一个 PI 席位，并且只操作**自己的席位**：`wait`、`submit`、`pass`、`point`、`quote`、`misquoted`、`mark`、`verdict`、`disclose`、`assign`、`artifacts`、`status`、`leave`。 |
-| 面板与命令「Governed Roundtable: Open panel」 | `ui.panel`、`pi.commands.register`、`onPanelInvoke` | 你这一侧的操作：列出房间、席位与绑定；在此服务 / 停止服务；设任务、开始一轮；发用户消息；重试 / 跳过；批准 / 拒绝披露；接受过期；散会；解除席位绑定。 |
+| 面板与命令「Governed Roundtable: Open panel」 | `ui.panel`、`pi.commands.register`、`onPanelInvoke` | 你这一侧的操作：列出房间、席位与绑定；在此服务 / 停止服务；设任务、开始一轮；发用户消息；重试 / 跳过；批准 / 拒绝披露；接受过期；散会；解除席位绑定。已散会的房间在面板里只读：没有在此服务、停止服务和打开房间界面的按钮；它的「解除绑定」要点两次，因为对话要靠绑定读散会包。 |
 | 浏览器里的房间界面 | `pi.shell.openExternal`，权限 `shell.openExternal` | 在系统浏览器里打开 room-dev 完整的房间界面（`http://127.0.0.1:<端口>/#<admin 令牌>`）。 |
 | 托管席位（通道 `pi-complete`） | `pi.agent.complete`，权限 `agent.complete` | 只讨论档的席位，经你在 PI-Desktop 里配置的模型发言：每回合一次补全，不带工具。作为 room-dev 的 `hostedProviders.lane` 工厂接入。 |
-| 轮次提示 | `pi.ui.showToast`（不需要权限） | 手动等待的席位轮到时，每个 attempt 给你弹一次提示。 |
+| 轮次提示 | `pi.ui.showToast`（不需要权限） | 手动等待的席位轮到时，每个 attempt 给你弹一次提示，用宿主的语言（任何 `zh` 语言环境用中文，其余用英文）：每次弹提示前重新读 `pi.app.getLocale`，并经 `pi.events` 跟随 `appearance:changed`。 |
+
+PI 席位的包只写 Room 工具的调用（模型看到的工具名是 `plugin_io_github_kennymcsimpson_governed_roundtable_Room`），从不写 room-dev 的命令行；托管席位的包只写它在回复里要写的 ASCII 标记。
 
 外部 agent（Codex、Claude Code、OpenCode、Gemini CLI……）入席方式和 room-dev 完全一样：房间给每个席位写一份 `JOIN.md`，agent 自己对房间目录运行内置的 `room-dev/room.mjs`（`wait`、`submit`……）。插件不碰它们。
 
@@ -52,8 +58,8 @@ room-dev 是一个本地、Windows 优先的「房间」，让你已经在用的
 | 托管席位（通道 `pi-complete`） | 它的包（任务、其他席位的话） | 每回合一次 `pi.agent.complete`，发往**你配置的模型**（消耗模型额度） | `agent.complete` | 你开始一轮 | 包 ≤ 200,000 字符，system ≤ 32 KiB，宿主限流 60 秒 8 次，`tools: []`，不要会话上下文 | — |
 | 面板 `roundtable/*` 通道 | 房间状态 | 发往在服务房间的管理命令（白名单 `task, start, say, close, skip, retry, approve-disclose, deny-disclose, accept-stale`） | `ui.panel` | 在面板里点击 | 未知命令拒绝（`UNKNOWN_CMD`） | 散会即停止服务该房间 |
 | 面板「打开房间界面」 | 房间的 admin 令牌 | 经 `pi.shell.openExternal` 交给系统浏览器 | `shell.openExternal` | 点击 | 只有回环地址；令牌在 URL 片段里（本机浏览器历史可能留下它） | — |
-| 轮次提示 | 席位与房间 id | `pi.ui.showToast` | 无 | — | 手动等待的席位每个 attempt 一次 | — |
-| 插件状态 | — | `pi.plugin.getDataPath()` 下的 `roundtable.json`（含会话 id 的席位绑定、要重新服务的房间） | 无 | — | 插件私有 | 在面板里解除绑定 |
+| 轮次提示 | 席位与房间 id；宿主语言（`pi.app.getLocale`、`appearance:changed`） | `pi.ui.showToast` | 无 | — | 手动等待的席位每个 attempt 一次 | 卸载时移除 `appearance:changed` 监听 |
+| 插件状态 | — | `pi.plugin.getDataPath()` 下的 `roundtable.json`（含会话 id 的席位绑定、要重新服务的房间） | 无 | — | 插件私有 | 在面板里解除绑定（已散会的房间要点两次） |
 | Codex 唤醒推送（room-dev） | 房间登记的唤醒 | room-dev 的 `codex queue` 子进程 | — | 只对在本插件**之外**登记了唤醒的房间 | Room 工具从不登记唤醒 | — |
 | 原生日志审计与唤醒前的空闲检查（room-dev） | 该 agent 自己的会话日志，只读：Codex 在 `%USERPROFILE%\.codex`，Claude Code 在 `%USERPROFILE%\.claude\projects` | 审计结果写进房间事件日志 | — | 只对在本插件**之外**登记了审计源或 Codex 唤醒线程的席位 | 只读；经 Room 工具创建的席位两者都不登记 | — |
 | 审方结论记录（room-dev） | 一条被认可的审方结论 | 在 `%USERPROFILE%\room-dev\adjudications.jsonl` 追加一行（房间 id、审方 agent 类型、预设、结论、产物哈希、标注） | — | 审方席位给出结论 | 只追加，经 room-dev 的单文件 guard | — |
@@ -119,7 +125,7 @@ node --test "integrations/pi-desktop-plugin/test/*.test.mjs"
 
 ## 已验证 / 未验证
 
-在作者的 Windows 11 机器上用 Node 24.11.1 跑 `integrations/pi-desktop-plugin/test/plugin.test.mjs`（15 个测试）、`test/panel.test.mjs`（4 个测试）和 `test/manifest.test.mjs`（5 个测试，检查市场对清单、面板和 README 的要求）验证。假宿主（`test/fake-pi-host.mjs`）复现了上游 `buildApi()` 的形状、初始化顺序、服务启停、工具上下文（`ctx` 各字段，以及调用作用域：`execute` 在一个 `AsyncLocalStorage` 调用里运行，从已结束调用的上下文发出的 `pi.*` 调用以 `PLUGIN_TOOL_ABORTED` 被拒绝）、面板路由、权限检查和 `agent.complete` 的限制，每一处都注明了上游行号。它在一个 Node 进程里运行，没有模拟这项检查在宿主一侧的部分、取消消息和真实的进程间通信。用它测了：
+在作者的 Windows 11 机器上用 Node 24.11.1 跑 `integrations/pi-desktop-plugin/test/plugin.test.mjs`（16 个测试）、`test/panel.test.mjs`（25 个测试）、`test/locale.test.mjs`（8 个测试，轮次提示的语言）和 `test/manifest.test.mjs`（6 个测试，检查市场对清单、面板和 README 的要求）验证。假宿主（`test/fake-pi-host.mjs`）复现了上游 `buildApi()` 的形状、初始化顺序、服务启停、工具上下文（`ctx` 各字段，以及调用作用域：`execute` 在一个 `AsyncLocalStorage` 调用里运行，从已结束调用的上下文发出的 `pi.*` 调用以 `PLUGIN_TOOL_ABORTED` 被拒绝）、面板路由、权限检查、`agent.complete` 的限制，以及宿主事件和语言的启动顺序（`pi.events`；开机时恢复的插件读到 `en`，之后才应用保存的语言并推送 `appearance:changed`），每一处都注明了上游行号。它在一个 Node 进程里运行，没有模拟这项检查在宿主一侧的部分、取消消息和真实的进程间通信。用它测了：
 
 - `build.mjs --source head` 复制的是提交里的字节，并记下 HEAD 提交号；
 - 插件加载，注册工具、命令和服务；服务启动不到 5 秒；
@@ -129,28 +135,42 @@ node --test "integrations/pi-desktop-plugin/test/*.test.mjs"
 - 跑完一整轮讨论：两个 PI 席位经工具发言，Claude Code 席位在另一个 Node 进程里按 JOIN.md 运行内置的 `room.mjs`；
 - 经工具建的房间里，托管席位经假的 `agent.complete` 发言，没有任何补全或提示因来自已结束的调用而被拒，包括 `RATE_LIMITED` → `seat_failed rate_limited`；
 - 面板：房间界面地址交给 `openExternal`、解除绑定、散会并交出散会包；
+- 没有 Room 工具交卷面的 pi-user 席位（0.1.0 版插件建的房间）已被对话占着时，面板里仍按 PI 席位显示它的绑定和「解除绑定」，轮次提示用对 PI 对话的说法；解除后不再让对话入座；
 - 用户停掉的房间不会被工具调用重新服务（`NOT_SERVED`），直到面板重新服务它；
 - 房间根目录路径里有空格时，`wait` 照样交出包和散会包；
 - 经房间界面的 `/api/admin` 散会的房间会释放 HTTP 服务和 `service.lock`；
 - 服务还在重新打开房间时就停止，不留任何在服务的房间；启动-停止-启动之后房间在服务；
 - 停止服务删除 `service.lock`，再启动重新服务房间，卸载后全部释放；
 - 带 room-dev 内置 Pi 席位的房间由插件服务时，不读 room-dev 保存的 Pi key（同一测试里作为对照的 room-dev 默认行为会读）；
-- 面板的语言取自宿主的 `app.getAppearance`（`zh-CN` → 开始一轮），取不到时用 `navigator.language`，并跟随 `appearance:changed`。
+- 面板的语言取自宿主的 `app.getAppearance`（`zh-CN` → 开始一轮），取不到时用 `navigator.language`，并跟随 `appearance:changed`；
+- 面板在用户打字时照常轮询：详情原地更新，有焦点的控件保留节点、文字、光标和输入法组字，重建时也找回已输入的文字；轮询不叠加，迟到的回答被丢弃（收起优先），两次确认撑得过一次轮询，轮询失败的报错在下一次成功后清掉而操作的报错保留，操作失败时文字保留；迟到的房间列表回答被丢弃，房间散会时它的草稿和待确认的按钮被清掉（已点过一次的「解除绑定」保留）；假文档会让被摘下的有焦点控件失焦，也不会给已摘下或隐藏的控件焦点；
+- 已散会的房间在面板里没有在此服务、停止服务和打开房间界面的按钮，详情只读，「解除绑定」要点两次；别的程序服务的房间没有在此服务按钮；一轮进行中「开始一轮」不可点；状态行和阶段名跟随语言；对已散会的房间，serve、admin 和 open-ui 回答 `ROOM_CLOSED`，面板用自己的语言显示 `ROOM_CLOSED`、`SERVED_ELSEWHERE` 和 `NOT_SERVED_HERE`；未服务房间的提示只在后台服务运行时才提「在此服务」；
+- 轮次提示跟随宿主语言：插件在开机时以 `en` 恢复、随后应用保存的 `zh-CN` 时，提示是中文；之后切换到英文会跟着变；没有事件时，每次提示前的 `getLocale` 也能读到语言；格式不对的 `appearance:changed` 和失败的 `getLocale` 保留上一次有效的语言；卸载时以及 `onLoad` 失败时移除监听（已注册的工具一并撤下）；读语言和弹提示都不在已结束的工具调用里运行。
 
 上游市场脚本对构建出的目录和打出的 `.piplug` 都跑过：0 个 blocker，58 条人工复核提示（每一条的理由写在提交说明里；提示本身不等于批准）。
 
-**未验证。** 下列各项都没有跑过。真实应用测试需要运行中的 PI-Desktop；作者机器上当时正在修另一个 PI 构建，所以有意没在那台机器上跑。这是把插件标为可审之前的下一步。
+**真实应用里已验证。** 测试对象是官方 `PI-Desktop-Portable-0.16.1.zip`，用可信的 CDP 点击和应用自带的 MCP 控制面驱动。配置目录是一次性的：`PI_DESKTOP_DATA_DIR`、`PI_DESKTOP_AGENTS_DIR`、`HOME`、`USERPROFILE` 和 `--user-data-dir` 都指向它。模型是本地 stub。`PI_DESKTOP_AGENTS_DIR` 不能少：不设的话，host-core 会读真实 home 下的 `.agents`，并启动里面登记的 MCP 服务器。
 
-- 在真实应用里加载插件（**Load dev plugin** 或 **Install plugin package**），包括安装对话框、授权和强制的工具前缀 `plugin_<id_safe>_Room`；
-- 在 Electron 的 `utilityProcess` 里，`main.js`（CommonJS）导入 ESM 的 `core.mjs`；
-- room-dev 的 HTTP 服务和定时器在这个进程里运行；
-- 真实的 `ctx.sessionId` 取值；
-- 从服务弹出的提示；
-- Windows 上 `shell.openExternal` 会不会保留携带 admin 令牌的 URL 片段。room-dev 自己的启动器改用 `rundll32 url.dll,FileProtocolHandler`，就是因为 `start` 和 `explorer.exe` 可能丢掉片段；丢了的话浏览器页面没有 admin 令牌，就到面板里做管理；
-- `agent.complete` 后面的真实模型；
+- **Load dev plugin。** 菜单项先打开文件夹选择框，再进入权限审阅，审阅里按风险列出五项权限。加载后插件为 `ready`，服务为 `running`。
+- **开机恢复。** 重启应用后插件被恢复，轮次提示跟随宿主语言：界面是 `zh-CN` 时提示为「圆桌 …：轮到席位 pi1 …」。早先的构建在这里显示英文，现在已修好。
+- **命令面板。** **Governed Roundtable: Open panel** 入口能打开面板窗口。面板跟随宿主语言，状态行和阶段名都已本地化。
+- **工具名与审批。** 模型看到的工具名是 `plugin_io_github_kennymcsimpson_governed_roundtable_Room`。它是延迟加载的工具，模型先经 `ToolSearch` 激活它，宿主随后弹出高风险审批卡。
+- **建房。** 经工具建的房间把席位 `pi1` 绑定到对话的会话 id。这个席位记下的交卷面是 `tool`，工具名就是上面这个。
+- **宿主校验。** 伪造的 `sessionId` 字段和工具里没有的动作 `start`，在插件运行之前就被宿主自己的 schema 校验拒绝。
+- **完整一轮。** PI 席位的包里只写 Room 工具调用，没有 `room.mjs` 或 `--seat` 这样的命令行。托管席位经宿主真实的 `agent.complete` 收到的请求里只写 ASCII 标记，其中伪造的 `authority=user` 块被转义、放在 `authority=none` 块里。之后发布总结，本轮结束。
+- **打字时的面板。** 光标和已打的字留在面板输入框里时，事件列表照常更新，打的字也还在。
+- **散会与解除绑定。** **散会**和已散会房间的**解除绑定**都要点第二次确认。已散会的房间详情只读，没有服务、停止或房间界面按钮。
+- **Install plugin package。** 装 `.piplug` 后，装好的目录与构建目录逐字节相同，服务在运行，面板能打开。
+
+**未验证。**
+
+- Windows 上 `shell.openExternal` 会不会保留携带 admin 令牌的 URL 片段（这个按钮会打开本机默认浏览器，所以没点）。room-dev 自己的启动器改用 `rundll32 url.dll,FileProtocolHandler`，就是因为 `start` 和 `explorer.exe` 可能丢掉片段；丢了的话浏览器页面没有 admin 令牌，就到面板里做管理；
+- 真实应用里的权限拒绝路径（五项权限都授予了；这些路径只在假宿主上测过）；
+- 对话或 `agent.complete` 背后的真实模型；
+- 外部 agent（Codex、Claude Code）加入由真实应用服务的房间；
 - 带过期锁的崩溃重启；
 - 记住的房间很多时，5 秒的启动预算能不能守住；
-- 面板在宿主窗口里的外观和行为。
+- 在真实面板里用输入法打字（假 DOM 覆盖了输入法事件）。
 
 **已知限制：**
 
@@ -162,7 +182,7 @@ node --test "integrations/pi-desktop-plugin/test/*.test.mjs"
 - 有 Codex 唤醒的房间，推送时在插件精简的环境变量里找 `codex.exe`（`LOCALAPPDATA`、`CODEX_HOME` 都传不进来）。
 - 已由别的程序（room-dev 桌面应用或命令行）服务的房间，到那边去管理。
 
-**上架准备：** 尚未提交。插件仓库的 CONTRIBUTING 要求高风险插件（后台服务、执行进程、写文件都算）提供能力 / 数据流矩阵（见上）、负向路径测试和两位独立维护者批准。提交用的负向路径测试放在那个仓库的 `tests/governed-roundtable.test.mjs`：伪造的会话 id 被拒、工具碰不到管理动作、未声明或未授予的权限干净地失败、停止服务释放房间锁、包保留来源横幅。真实应用加载测试仍未做（见上）。
+**上架准备：** 已作为草稿 PR 提交。插件仓库的 CONTRIBUTING 要求高风险插件（后台服务、执行进程、写文件都算）提供能力 / 数据流矩阵（见上）、负向路径测试和两位独立维护者批准。提交用的负向路径测试放在那个仓库的 `tests/governed-roundtable.test.mjs`：伪造的会话 id 被拒、工具碰不到管理动作、未声明或未授予的权限干净地失败、停止服务释放房间锁、包保留来源横幅。真实应用里的测试见上。
 
 ## 许可
 

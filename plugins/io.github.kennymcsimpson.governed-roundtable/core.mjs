@@ -2,6 +2,7 @@
 // requires) imports this module and hands it the host's `pi` object. Only upstream plugin APIs are
 // used: pi.services (the resident room host), pi.agent.registerTool (the Room tool),
 // pi.agent.complete (text-only hosted seats), pi.commands, pi.ui.openPanel / showToast,
+// pi.app.getLocale and pi.events (appearance:changed) for the toast language,
 // pi.shell.openExternal and pi.plugin.getDataPath. The room itself is the vendored room-dev engine
 // under ./room-dev/, run in this plugin's own process through its embedding API (lib/api.mjs).
 //
@@ -36,6 +37,11 @@ export const OPEN_PANEL_COMMAND = 'roundtable.openPanel';
 export const LANE = 'pi-complete';
 /** room-dev agent kind recorded for a PI-Desktop conversation seat. */
 export const PI_SEAT_AGENT = 'pi-user';
+/** The name PI-Desktop gives the model for a plugin tool: upstream packages/plugin-sdk/src/index.ts
+ *  2053-2057 pluginToolName, applied at apps/desktop/electron/main/plugin-runtime.ts 2569. */
+export function hostToolName(pluginId, toolName) {
+  return `plugin_${String(pluginId).replace(/[^a-zA-Z0-9_]/g, '_')}_${String(toolName).replace(/[^a-zA-Z0-9_]/g, '_')}`;
+}
 export const EXTERNAL_AGENTS = Object.freeze(['claude-code', 'codex-desktop', 'codex-cli', 'opencode', 'gemini-cli', 'kimi', 'dsh', 'generic']);
 export const PRESETS = Object.freeze(['implement-review', 'discussion', 'report', 'cross-check', 'division', 'simplified']);
 export const ROLES = Object.freeze(['lead', 'executor', 'reviewer', 'participant']);
@@ -60,6 +66,15 @@ function coded(code, message) { return Object.assign(new Error(message), { code 
 function refuse(code, message, extra = {}) { return { ok: false, error: code, message, ...extra }; }
 function keyOf(dir) { const r = path.resolve(dir); return process.platform === 'win32' ? r.toLowerCase() : r; }
 function clip(s, n) { const t = String(s ?? ''); return t.length > n ? `${t.slice(0, n)}…` : t; }
+
+/** Any Chinese host locale gets the Chinese toasts: the same rule as the panel (renderer/panel.js normalizeLocale). */
+export function isZhLocale(v) { return /^zh/i.test(String(v || '')); }
+/** The turn toast the user sees, in the host's language. User-facing only: the text the model gets stays English. */
+export function turnToast(roomId, seatId, piSeat, zh) {
+  return zh
+    ? `圆桌 ${roomId}：轮到席位 ${seatId}。${piSeat ? '请让坐在这个席位的 PI 对话继续（调用 Room 工具的 wait 取包）。' : '请提醒这个席位的 agent 运行 wait 取包。'}`
+    : `Roundtable ${roomId}: seat ${seatId}'s turn. ${piSeat ? 'Ask the PI conversation in that seat to continue (Room tool, action wait).' : 'Remind that agent to run its wait command.'}`;
+}
 
 // ------------------------------------------------------------------------------------------------
 // Plugin-owned state: seat bindings (room -> seat -> session) and the rooms to serve again after a
@@ -121,7 +136,16 @@ export function createRoundtablePlugin(pi) {
   let store = null;
   let serviceUp = false;
   let log = () => {};
+  // The host language for the turn toasts. It is not read once and kept: upstream answers getLocale
+  // with "en" while it restores the enabled plugins at boot (main-state.ts 83; startup.ts 286
+  // bootBackends runs before 314-322 apply the stored settings), then pushes appearance:changed
+  // when the language is applied or switched (app-lifecycle.ts 586, 598 -> 569 -> 652-658;
+  // ADR 0280). So the plugin follows that event and also reads getLocale again at each toast.
+  // The text returned to the model (instructions, refusals) stays English and must not read this.
   let zh = false;
+  function applyLocale(v) { if (typeof v === 'string' && v.trim()) zh = isZhLocale(v); }
+  const onAppearance = (a) => { if (a && typeof a === 'object' && !Array.isArray(a)) applyLocale(a.locale); };
+  const unsubscribe = () => { try { if (pi.events && typeof pi.events.off === 'function') pi.events.off('appearance:changed', onAppearance); } catch { /* host gone */ } };
   const served = new Map();   // keyOf(roomDir) -> { id, roomDir, handle, notified, timer }
   const opening = new Map();  // keyOf(roomDir) -> { gen, p }
   // Service generation: bumped by every start and stop, so a room whose opening began under an
@@ -130,6 +154,8 @@ export function createRoundtablePlugin(pi) {
   // Runs fn in the async context captured here (onLoad) and again at service.start: never inside a
   // tool invocation. See the header.
   let detached = AsyncResource.bind((fn) => fn());
+  // The Room tool's name as the model sees it (hostToolName), set first thing in onLoad.
+  let modelToolName = null;
 
   const roomsRoot = () => defaultRoomsRoot();
   function roomDirOf(roomId) {
@@ -154,9 +180,16 @@ export function createRoundtablePlugin(pi) {
     if (e) { try { return e.handle.view(); } catch { /* fall through to the file */ } }
     return readJson(path.join(roomDir, 'state.json'), null);
   }
-  function seatKind(s) {
+  // A seat a PI conversation may take: created for this plugin's Room tool. A pi-user seat without
+  // that surface (an older room, or a command-line Pi seated through JOIN.md) gets command-line packets.
+  function isPiSeat(s) { return !!(s && !s.hosted && s.agent === PI_SEAT_AGENT && s.surface && s.surface.kind === 'tool' && s.surface.tool === modelToolName); }
+  // For display (panel, turn toasts, the Room tool's list) a pi-user seat without that surface that a
+  // conversation already holds (a room made by the 0.1.0 plugin) is still a PI seat: the binding keeps
+  // working, so it stays visible and releasable. join and create keep the stricter isPiSeat.
+  function isPiHeld(s, bindings) { return isPiSeat(s) || !!(s && !s.hosted && s.agent === PI_SEAT_AGENT && bindings && bindings[s.seatId]); }
+  function seatKind(s, bindings) {
     if (s.hosted) return s.hosted.kind === 'lane' ? `hosted:${s.hosted.lane}` : 'hosted:pi';
-    return s.agent === PI_SEAT_AGENT ? 'pi' : `external:${s.agent || 'generic'}`;
+    return isPiHeld(s, bindings) ? 'pi' : `external:${s.agent || 'generic'}`;
   }
   function boundSeatOf(roomDir, sessionId) {
     const b = store.seatsOf(roomDir);
@@ -216,11 +249,13 @@ export function createRoundtablePlugin(pi) {
       const seat = seats.find((s) => s.seatId === seatId);
       if (!seat || seat.hosted || seat.waitMode !== 'manual') continue;
       entry.notified.add(attemptId);
-      const pi_ = seat.agent === PI_SEAT_AGENT;
-      const msg = zh
-        ? `圆桌 ${entry.id}：轮到席位 ${seatId}。${pi_ ? '请让坐在这个席位的 PI 对话继续（调用 Room 工具的 wait 取包）。' : '请提醒这个席位的 agent 运行 wait 取包。'}`
-        : `Roundtable ${entry.id}: seat ${seatId}'s turn. ${pi_ ? 'Ask the PI conversation in that seat to continue (Room tool, action wait).' : 'Remind that agent to run its wait command.'}`;
-      Promise.resolve().then(() => detached(() => pi.ui.showToast(msg, 'info'))).catch(() => {});
+      const pi_ = isPiHeld(seat, store && store.seatsOf(entry.roomDir));
+      // The language is read again for each toast (getLocale needs no permission), in the
+      // detached context like the toast itself; if the read fails, the last known language stays.
+      Promise.resolve().then(() => detached(async () => {
+        try { applyLocale(await pi.app.getLocale()); } catch { /* keep the last known language */ }
+        return pi.ui.showToast(turnToast(entry.id, seatId, pi_, zh), 'info');
+      })).catch(() => {});
     }
   }
   // A room closed outside the panel (the room UI in the browser): one more tick hands out the
@@ -378,7 +413,7 @@ export function createRoundtablePlugin(pi) {
       served: here ? 'here' : lockElsewhere(roomDir) ? 'elsewhere' : 'stopped',
       seats: cfg.seats.map((s) => {
         const b = bindings[s.seatId];
-        const out = { seat: s.seatId, role: s.role, kind: seatKind(s), waitMode: s.waitMode };
+        const out = { seat: s.seatId, role: s.role, kind: seatKind(s, bindings), waitMode: s.waitMode };
         if (s.hosted && s.hosted.model) out.model = s.hosted.model;
         if (out.kind === 'pi') {
           if (panel) out.boundTo = b ? `…${String(b.sessionId).slice(-6)}` : null;
@@ -457,7 +492,7 @@ export function createRoundtablePlugin(pi) {
       fields: ['attempt', 'paths', 'baseline', 'exclude'],
       run: (c, a) => {
         need(Array.isArray(a.paths) && a.paths.length > 0 && a.paths.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 1024), 'paths', 'one or more paths inside your working folder');
-        need(a.baseline === undefined || (typeof a.baseline === 'string' && /^[A-Za-z0-9]{1,128}$/.test(a.baseline)), 'baseline', 'none | whole | <manifestSha>');
+        need(a.baseline === undefined || (typeof a.baseline === 'string' && /^(none|whole|[0-9a-f]{64})$/.test(a.baseline)), 'baseline', 'none | whole | <manifestSha>');
         need(a.exclude === undefined || (typeof a.exclude === 'string' && a.exclude.length <= 256), 'exclude', 'a glob');
         return c.artifacts({ attemptId: attemptOf(a), paths: a.paths, baseline: a.baseline, exclude: a.exclude });
       },
@@ -506,7 +541,10 @@ export function createRoundtablePlugin(pi) {
     const seat = cfg.seats.find((s) => s.seatId === seatId);
     if (!seat) throw coded('NO_SUCH_SEAT', `room ${roomId} has no seat ${seatId}`);
     if (seat.hosted) throw coded('HOSTED_SEAT', `seat ${seatId} is a hosted seat run by the room; nobody joins it`);
-    if (seat.agent !== PI_SEAT_AGENT) throw coded('NOT_A_PI_SEAT', `seat ${seatId} is for an external agent (${seat.agent}); that agent joins through ${path.join(roomDir, 'seats', seatId, 'JOIN.md')}`);
+    if (!isPiSeat(seat)) {
+      if (seat.agent === PI_SEAT_AGENT) throw coded('NOT_A_PI_SEAT', `seat ${seatId} was not created for this plugin's Room tool, so its packets would carry command lines; ask the user to create a room with a 'pi' seat through the Room tool`);
+      throw coded('NOT_A_PI_SEAT', `seat ${seatId} is for an external agent (${seat.agent}); that agent joins through ${path.join(roomDir, 'seats', seatId, 'JOIN.md')}`);
+    }
     const b = store.seatsOf(roomDir);
     if (b[seatId] && b[seatId].sessionId !== sessionId) throw coded('SEAT_TAKEN', `seat ${seatId} is already bound to another conversation; the user can release it in the panel`);
     const other = boundSeatOf(roomDir, sessionId);
@@ -551,7 +589,7 @@ export function createRoundtablePlugin(pi) {
     const seats = [];
     for (const s of args.seats) {
       const p = { dir: roomDir, seat: s.seat, role: s.role, cwd: s.cwd, name: s.name, reviews: s.reviews ? s.reviews.join(',') : undefined };
-      if (s.agent === 'pi') Object.assign(p, { agent: PI_SEAT_AGENT, wait: 'manual' });
+      if (s.agent === 'pi') Object.assign(p, { agent: PI_SEAT_AGENT, wait: 'manual', surface: `tool:${modelToolName}` });
       else if (s.agent === 'complete') Object.assign(p, { hosted: `lane:${LANE}:discussion`, model: s.model });
       else p.agent = s.agent;
       const r = await addSeat(p);
@@ -659,18 +697,35 @@ export function createRoundtablePlugin(pi) {
       stale: Object.values(st.artifacts || {}).filter((a) => a && a.recomputed && (a.recomputed.stale || (Array.isArray(a.recomputed.changed) && a.recomputed.changed.length)))
         .map((a) => ({ manifestSha: a.manifestSha, seatId: a.seatId || null, changed: (a.recomputed.changed || []).map((c) => c.path), accepted: !!a.staleAccepted })),
       recent: events.slice(-15).map((ev) => ({ seq: ev.seq, type: ev.type, seatId: ev.seatId || null, ts: ev.ts || null })),
+      // A round is under way: the engine refuses start (ROUND_IN_PROGRESS) until it is done. Only in
+      // the panel's detail, not in summarize(), which also shapes the Room tool's list output.
+      roundActive: !!st.phase && !['idle', 'done', 'closed'].includes(st.phase),
     };
+  }
+  // The panel's refusals for a room it cannot administer: closed (never served again), served by
+  // another app, or simply not served here.
+  const closedOnDisk = (roomDir) => { const st = readJson(path.join(roomDir, 'state.json'), null); return !!(st && st.closed); };
+  const roomClosed = (roomId) => refuse('ROOM_CLOSED', `room ${roomId} is closed; a closed room is not served again`, { served: 'closed' });
+  const servedElsewhere = () => refuse('SERVED_ELSEWHERE', 'another app serves this room; administer it there', { served: 'elsewhere' });
+  function notServedHere(roomId, roomDir, advice) {
+    if (closedOnDisk(roomDir)) return roomClosed(roomId);
+    if (lockElsewhere(roomDir)) return servedElsewhere();
+    return refuse('NOT_SERVED_HERE', advice);
   }
 
   const PANEL = {
     'roundtable/rooms': async () => ({ ok: true, serviceRunning: serviceUp, roomsRoot: roomsRoot(), rooms: listRooms({ panel: true }) }),
     'roundtable/room': async (p) => detail(p.room),
     'roundtable/serve': async (p) => {
-      roomDirOf(p.room);
+      const roomDir = roomDirOf(p.room);
+      // Checked before stoppedByUser is touched: a closed room keeps what the user last chose.
+      if (closedOnDisk(roomDir)) return roomClosed(p.room);
       store.setStoppedByUser(p.room, false);
       const r = await serveHere(p.room);
-      if (r.where === 'here') store.setOpen(p.room, true);
-      return { ok: r.where === 'here', served: r.where };
+      if (r.where === 'closed') return roomClosed(p.room);
+      if (r.where === 'elsewhere') return servedElsewhere();
+      store.setOpen(p.room, true);
+      return { ok: true, served: r.where };
     },
     'roundtable/stop': async (p) => {
       const stopped = await stopServing(p.room);
@@ -678,8 +733,10 @@ export function createRoundtablePlugin(pi) {
       return { ok: true, stopped };
     },
     'roundtable/open-ui': async (p) => {
-      const e = liveEntry(roomDirOf(p.room));
-      if (!e || !e.handle.url) return refuse('NOT_SERVED_HERE', 'serve the room here first');
+      const roomDir = roomDirOf(p.room);
+      const e = liveEntry(roomDir);
+      if (!e) return notServedHere(p.room, roomDir, 'serve the room here first');
+      if (!e.handle.url) return refuse('NOT_SERVED_HERE', 'serve the room here first');
       await pi.shell.openExternal(`${e.handle.url}#${e.handle.adminToken}`);
       return { ok: true };
     },
@@ -692,8 +749,9 @@ export function createRoundtablePlugin(pi) {
     'roundtable/admin': async (p) => {
       const cmd = p.cmd;
       if (typeof cmd !== 'string' || !Object.prototype.hasOwnProperty.call(PANEL_ADMIN, cmd)) return refuse('UNKNOWN_CMD', `cmd must be one of ${Object.keys(PANEL_ADMIN).join(', ')}`);
-      const e = liveEntry(roomDirOf(p.room));
-      if (!e) return refuse('NOT_SERVED_HERE', 'serve the room here first (a room served by another app is administered there)');
+      const roomDir = roomDirOf(p.room);
+      const e = liveEntry(roomDir);
+      if (!e) return notServedHere(p.room, roomDir, 'serve the room here first (a room served by another app is administered there)');
       const params = {};
       for (const k of PANEL_ADMIN[cmd]) if (p[k] !== undefined) params[k] = p[k];
       if (cmd === 'start' && typeof params.order === 'string') params.order = params.order.split(',').map((x) => x.trim()).filter(Boolean);
@@ -720,24 +778,35 @@ export function createRoundtablePlugin(pi) {
 
   // ---------------------------------------------------------------- lifecycle
   async function onLoad() {
+    const manifest = pi.plugin.getManifest();
+    modelToolName = hostToolName(manifest && manifest.id, TOOL_NAME);
     detached = AsyncResource.bind((fn) => fn());
     const dataDir = await pi.plugin.getDataPath();
     store = createStore(path.join(String(dataDir), 'roundtable.json'));
-    try { zh = /^zh/i.test(String(await pi.app.getLocale())); } catch { zh = false; }
-    pi.services.register(service);
-    const manifest = pi.plugin.getManifest();
-    const decl = ((manifest && manifest.contributes && manifest.contributes.agentTools) || []).find((t) => t.name === TOOL_NAME);
-    if (!decl) throw coded('MANIFEST', `manifest declares no ${TOOL_NAME} tool`);
-    await pi.agent.registerTool({ ...decl, execute: executeTool });
+    // Subscribe first, then read: host events arrive in order on the same port as the answer, so
+    // a switch between the read and the subscription is not lost.
+    if (pi.events && typeof pi.events.on === 'function') pi.events.on('appearance:changed', onAppearance);
+    // A failed load leaves no listener and no tool behind: main.js keeps no plugin to unload, and a
+    // host that keeps the process (dev reloads) would otherwise keep them.
+    let toolRegistered = false;
     try {
+      try { applyLocale(await pi.app.getLocale()); } catch { /* en */ }
+      pi.services.register(service);
+      const decl = ((manifest && manifest.contributes && manifest.contributes.agentTools) || []).find((t) => t.name === TOOL_NAME);
+      if (!decl) throw coded('MANIFEST', `manifest declares no ${TOOL_NAME} tool`);
+      await pi.agent.registerTool({ ...decl, execute: executeTool });
+      toolRegistered = true;
       await pi.commands.register({ id: OPEN_PANEL_COMMAND, title: 'Governed Roundtable: Open panel', keywords: ['room', 'roundtable', '圆桌'], category: 'Roundtable', run: () => pi.ui.openPanel() });
     } catch (e) {
-      await Promise.allSettled([pi.agent.unregisterTool(TOOL_NAME)]);
+      if (toolRegistered) await Promise.allSettled([pi.agent.unregisterTool(TOOL_NAME)]);
+      unsubscribe();
       throw e;
     }
   }
   async function onUnload() {
     await shutDown();
+    // The upstream child exits after unload anyway; a host that keeps the process must not keep the listener.
+    unsubscribe();
     await Promise.allSettled([pi.agent.unregisterTool(TOOL_NAME), pi.commands.unregister(OPEN_PANEL_COMMAND)]);
   }
 
