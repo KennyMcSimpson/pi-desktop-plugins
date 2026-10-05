@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>圆桌启动器</title>
+<link rel="stylesheet" href="lobby.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-main">
+    <span class="brand">圆桌启动器</span>
+    <span id="hdr-root" class="hdr-item">房间目录 <b>未知</b></span>
+  </div>
+  <div class="topbar-side">
+    <span id="hdr-conn" class="conn">连接：未知</span>
+    <span id="hdr-token" class="tok tok-missing">令牌：缺失</span>
+  </div>
+</header>
+
+<div id="token-bar" class="notice warn hidden">
+  <p>这个页面没有拿到启动器令牌，只能看，不能建房或开房。用圆桌应用时，关掉窗口重新打开圆桌即可；用命令行启动器（room.mjs lobby）时，打开它打印的那条链接（每次启动都会换新的令牌；刷新本页也会丢掉令牌）。</p>
+  <form id="token-form" class="inline-form">
+    <input id="token-input" type="password" autocomplete="off" placeholder="或者把链接 # 后面那一段粘贴到这里">
+    <button type="submit">载入到本页（只存内存）</button>
+  </form>
+</div>
+
+<nav class="tabs" id="tabs" aria-label="视图">
+  <button type="button" data-view="rooms" class="tab active">房间列表</button>
+  <button type="button" data-view="create" class="tab">新建房间</button>
+</nav>
+
+<main id="main">
+
+<section id="view-rooms" class="view active" data-view="rooms">
+  <div class="actions">
+    <button type="button" id="btn-refresh">刷新</button>
+    <button type="button" id="btn-goto-create" class="primary">新建房间</button>
+    <span class="hint">每 3 秒自动刷新。「打开房间界面」会在本进程里启动这个房间的服务；关掉启动器窗口时，从这里打开的房间都会停下。</span>
+  </div>
+  <div id="rooms" class="cards"></div>
+</section>
+
+<section id="view-create" class="view" data-view="create">
+  <form id="form-create" class="card" autocomplete="off">
+    <h4>新建房间</h4>
+    <div class="field-grid">
+      <label for="room-id">房间编号</label>
+      <div>
+        <input id="room-id" name="id" type="text" required pattern="[A-Za-z0-9_\-]+" placeholder="例如 demo（字母、数字、- 和 _）">
+        <div class="hint">房间建在 <span id="room-dir-hint" class="mono">房间目录</span> 下。</div>
+      </div>
+      <label for="room-preset">预设</label>
+      <div>
+        <select id="room-preset" name="preset"></select>
+        <div id="preset-desc" class="hint"></div>
+      </div>
+    </div>
+
+    <h3>席位</h3>
+    <p class="hint">每个席位是一个已经开着的 coding agent。工作文件夹是那个 agent 能写的地方：执行者一般就是你的项目文件夹；主力兼审方建议给一个专门的空文件夹，这样它对产物只读。用已有的项目文件夹时，取消勾选「替我新建这个空文件夹」（填好路径后页面会自动查一次：文件夹已存在就替你取消勾选）。agent 选「房间内置 Pi」时，这个席位由房间自己托管，不需要另开 agent。</p>
+    <div id="seat-rows" class="seat-rows"></div>
+    <div class="actions">
+      <button type="button" id="btn-add-seat">添加席位</button>
+      <button type="button" id="btn-template">按预设恢复默认席位</button>
+    </div>
+    <div class="actions">
+      <button type="submit" id="btn-create" class="primary">建房并生成入席说明</button>
+      <span id="create-status" class="hint"></span>
+    </div>
+  </form>
+
+  <div id="created" class="hidden"></div>
+</section>
+
+</main>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="lobby.js"></script>
+</body>
+</html>

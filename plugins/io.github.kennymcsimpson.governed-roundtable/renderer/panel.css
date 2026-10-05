@@ -1,0 +1,68 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --line: #dde1e8;
+  --text: #1d2330;
+  --muted: #687185;
+  --accent: #3f6fd8;
+  --accent-text: #ffffff;
+  --warn: #b5541c;
+  --ok: #2c7a4b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b;
+    --card: #1a1f28;
+    --line: #2b3240;
+    --text: #e6e9ef;
+    --muted: #9aa3b5;
+    --accent: #6d93ee;
+    --accent-text: #0d1118;
+    --warn: #e39461;
+    --ok: #6fc79a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: calc(var(--pi-plugin-titlebar-height, 46px) + 8px) 16px 16px;
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+h1 { font-size: 16px; margin: 0; flex: 1; }
+h2 { font-size: 14px; margin: 0 0 6px; }
+.bar { display: flex; align-items: center; gap: 8px; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { color: var(--ok); border-color: var(--ok); }
+.pill.off { color: var(--warn); border-color: var(--warn); }
+.muted { color: var(--muted); font-size: 12px; word-break: break-all; }
+.error { color: var(--warn); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+td, th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+code { font-size: 11px; word-break: break-all; }
+button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--accent); }
+button.danger { background: transparent; color: var(--warn); border-color: var(--warn); }
+button:disabled { opacity: 0.5; cursor: default; }
+textarea, input[type="text"] {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+}
+textarea { min-height: 72px; resize: vertical; }

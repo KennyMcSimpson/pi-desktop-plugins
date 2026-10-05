@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      PI-Desktop owns exactly a transparent 46px drag band at the top of the panel and a minimal
+      three-button window-control capsule in its top-right corner. This panel opts into
+      pi-plugin-chrome v3 and owns its own top spacing: panel.css pads the body by
+      var(--pi-plugin-titlebar-height, 46px) so no plugin content sits under the band or the
+      capsule, and it draws no titlebar of its own.
+    -->
+    <meta name="pi-plugin-chrome" content="v3" />
+    <title>Governed Roundtable</title>
+    <link rel="stylesheet" href="./panel.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1 id="title">Governed Roundtable</h1>
+      <span id="service" class="pill"></span>
+      <button id="refresh" type="button" class="ghost"></button>
+    </header>
+    <p id="root" class="muted"></p>
+    <p id="error" class="error" hidden></p>
+    <section id="rooms" aria-live="polite"></section>
+    <section id="detail" hidden></section>
+    <script src="./panel.js"></script>
+  </body>
+</html>

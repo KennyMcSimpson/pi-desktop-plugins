@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>圆桌房间</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-main">
+    <span class="brand">圆桌房间</span>
+    <span id="hdr-room" class="hdr-item">房间 <b>未知</b></span>
+    <span id="hdr-phase" class="hdr-item">阶段 <b class="badge">未知</b></span>
+    <span id="hdr-round" class="hdr-item">轮 <b>未知</b> · epoch <b>未知</b></span>
+    <span id="hdr-turn" class="hdr-item">当前 <b>未知</b></span>
+    <span id="hdr-seq" class="hdr-item">seq <b>0</b></span>
+  </div>
+  <div class="topbar-side">
+    <span id="hdr-conn" class="conn conn-unknown" title="轮询 /api/state 与 /api/events，每 2 秒一次">连接：未知</span>
+    <span id="hdr-token" class="tok tok-missing">令牌：缺失</span>
+  </div>
+</header>
+
+<div id="token-bar" class="notice warn hidden">
+  URL 片段里没有 admin 令牌（形如 <code>#&lt;token&gt;</code>）。没有令牌只能看，不能动作。
+  <form id="token-form" class="inline-form">
+    <input id="token-input" type="password" autocomplete="off" placeholder="粘贴 admin.token 的内容">
+    <button type="submit">载入到本页（只存内存）</button>
+  </form>
+</div>
+
+<nav class="tabs" id="tabs" aria-label="视图">
+  <button data-view="stream" class="tab active">发言流</button>
+  <button data-view="seats" class="tab">席位栏</button>
+  <button data-view="packets" class="tab">席位包</button>
+  <button data-view="task" class="tab">任务单</button>
+  <button data-view="items" class="tab">条目表</button>
+  <button data-view="verdicts" class="tab">verdict 与冻结</button>
+  <button data-view="receipts" class="tab">回执</button>
+  <button data-view="usage" class="tab">用量</button>
+  <button data-view="recovery" class="tab">恢复</button>
+  <button data-view="merge" class="tab">合并</button>
+  <button data-view="contract" class="tab">契约</button>
+</nav>
+
+<main id="main">
+
+<section id="view-stream" class="view active" data-view="stream">
+  <div class="actions">
+    <form id="form-say" class="inline-form" data-action="say">
+      <input name="text" type="text" placeholder="给席位的新消息（默认下一轮边界进入包）" required>
+      <button type="submit">排队新消息 <code>say</code></button>
+    </form>
+    <form id="form-interrupt" class="inline-form" data-action="interrupt">
+      <input name="text" type="text" placeholder="打断说明（可空）">
+      <button type="submit" class="danger">打断并重开 <code>interrupt</code></button>
+    </form>
+  </div>
+  <div id="task-box" class="card task-box"></div>
+  <ol id="stream" class="stream"></ol>
+</section>
+
+<section id="view-seats" class="view" data-view="seats">
+  <div class="actions">
+    <button id="btn-reverse" class="danger" data-action="reverse">整体换向 <code>reverse</code></button>
+    <span class="hint">换向要求当前 attempt 已终态；否则服务拒绝并记录。</span>
+  </div>
+  <div class="scroll-x"><table id="seats-table" class="table"></table></div>
+  <p class="hint">审计观测只能说「在该方法下未观测到写操作」；审计不到的席位标「未审计」。</p>
+</section>
+
+<section id="view-packets" class="view" data-view="packets">
+  <div id="packets-list" class="cards"></div>
+</section>
+
+<section id="view-task" class="view" data-view="task">
+  <div id="task-draft" class="card"></div>
+  <div class="actions">
+    <button id="btn-confirm-task" data-action="confirm-task">确认任务单 <code>confirm-task</code></button>
+    <form id="form-deny-task" class="inline-form" data-action="interrupt">
+      <input name="text" type="text" placeholder="驳回理由（主力会在重开的回合里看到）">
+      <button type="submit" class="danger">驳回草案 <code>interrupt</code></button>
+    </form>
+  </div>
+  <form id="form-manual-task" class="block-form" data-action="task">
+    <label>手填任务（<code>task</code>；填好后仍需「确认任务单」）</label>
+    <textarea name="text" rows="5" placeholder="每行一条：- <seatId>: <任务> | 验收: [&quot;node&quot;,&quot;--test&quot;]" required></textarea>
+    <button type="submit">提交手填任务 <code>task</code></button>
+  </form>
+</section>
+
+<section id="view-items" class="view" data-view="items">
+  <div class="scroll-x"><table id="items-table" class="table"></table></div>
+  <h3>被误述声明</h3>
+  <ul id="misquoted-list" class="plain"></ul>
+</section>
+
+<section id="view-verdicts" class="view" data-view="verdicts">
+  <div id="artifacts-list" class="cards"></div>
+  <h3>披露请求</h3>
+  <div id="disclosures-list" class="cards"></div>
+  <p id="adjudication-hint" class="hint"></p>
+</section>
+
+<section id="view-receipts" class="view" data-view="receipts">
+  <div class="scroll-x"><table id="receipts-table" class="table"></table></div>
+  <p class="hint">present / header_only 由审计器在登记线程里按 packetId 查到；证明包到了 agent 的进程与日志，不证明模型读了。「重发」= 再推一次唤醒（<code>wake</code>），席位下一次 wait 取同一个包。</p>
+</section>
+
+<section id="view-usage" class="view" data-view="usage">
+  <div id="usage-summary" class="card"></div>
+  <div class="scroll-x"><table id="usage-table" class="table"></table></div>
+  <div class="actions">
+    <form id="form-cap" class="inline-form" data-action="change-cap">
+      <input name="maxTokens" type="number" min="0" placeholder="新的 token 上限">
+      <button type="submit">改上限</button>
+    </form>
+    <form id="form-continue" class="inline-form" data-action="start">
+      <input name="order" type="text" placeholder="顺序，如 A,B,A（默认沿用上一轮）">
+      <button type="submit">继续 <code>start</code></button>
+    </form>
+    <button data-action="skip">跳过 <code>skip</code></button>
+    <button class="danger" data-action="close">结束 <code>close</code></button>
+  </div>
+</section>
+
+<section id="view-recovery" class="view" data-view="recovery">
+  <div id="recovery-list" class="cards"></div>
+</section>
+
+<section id="view-merge" class="view" data-view="merge">
+  <div class="scroll-x"><table id="merge-table" class="table"></table></div>
+</section>
+
+<section id="view-contract" class="view" data-view="contract">
+  <div id="contract-box" class="cards"></div>
+  <div class="actions">
+    <button id="btn-export" data-action="export-evidence">导出证据（本页已拉取的 state + events，JSON）</button>
+  </div>
+</section>
+
+</main>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
