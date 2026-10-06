@@ -82,22 +82,44 @@ class StaticFindingTests(unittest.TestCase):
             findings,
         )
 
-    def test_approved_generated_dependency_requires_exact_hash(self):
-        path = ROOT / "plugins" / "pi.markdown" / "renderer" / "assets" / "app.js"
-        findings = []
-        security_audit.audit_text(
-            findings,
-            "pi.markdown/renderer/assets/app.js",
-            "renderer/assets/app.js",
-            path.read_text(encoding="utf-8"),
-        )
+    def test_shipped_package_passes_the_preflight(self):
+        packages = sorted((ROOT / "packages").glob("pi.markdown-*.piplug"))
+        if not packages:
+            self.skipTest("pi.markdown package is not present in this checkout")
+        findings = security_audit.audit_package(packages[-1])
         self.assertFalse([item for item in findings if item.severity == "BLOCKER"], findings)
 
 
 class ManifestAndPackageTests(unittest.TestCase):
-    def test_current_sample_has_no_automatic_blocker(self):
-        findings, _ = security_audit.audit_plugin(ROOT / "plugins" / "demo.hello", include_review=False)
-        self.assertFalse([item for item in findings if item.severity == "BLOCKER"], findings)
+    def test_clean_sample_plugin_has_no_automatic_blocker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin = Path(tmp) / "sample.plugin"
+            (plugin / "renderer").mkdir(parents=True)
+            (plugin / "main.js").write_text("module.exports = {};\n", encoding="utf-8")
+            (plugin / "renderer" / "index.html").write_text("<html></html>\n", encoding="utf-8")
+            (plugin / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "id": "sample.plugin",
+                        "name": "Sample",
+                        "version": "0.1.0",
+                        "description": "Sample",
+                        "i18n": {
+                            "en": {"name": "Sample", "description": "Sample", "safetyNotes": "None"},
+                            "zh-CN": {"name": "示例", "description": "示例", "safetyNotes": "无"},
+                        },
+                        "author": "test",
+                        "main": "main.js",
+                        "permissions": ["ui.panel"],
+                        "engines": {"piDesktop": ">=0.2.0"},
+                        "ui": {"panel": "renderer/index.html"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            findings, _ = security_audit.audit_plugin(plugin, include_review=False)
+            self.assertFalse([item for item in findings if item.severity == "BLOCKER"], findings)
 
     def test_manifest_surface_requires_matching_permission(self):
         with tempfile.TemporaryDirectory() as tmp:

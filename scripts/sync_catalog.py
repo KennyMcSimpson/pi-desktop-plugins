@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Reserved helper for a future plugins.aiuo.net catalog mirror.
+"""Mirror the published catalog from the plugin center into this repository.
 
-Not used while this GitHub repo is the live marketplace. Publish with
-pack_plugin.py + rebuild_catalog.py until that registry launches.
+The center (https://plugins.aiuo.net) is the live marketplace and the source of
+truth for every release; this repository serves a copy of catalog.json plus the
+packages it references. Use --dry-run to see what would change first.
 
 Failure is fail-closed: exit non-zero and do not replace catalog.json or
 packages/. Empty or shrinking-to-zero catalogs are rejected.

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Fail-closed security preflight for PI-Desktop plugins.
+"""Fail-closed security preflight for PI-Desktop plugin packages.
 
 This is a static safety net, not a substitute for a maintainer reading the
 source and the packed artifact. It rejects high-confidence indicators of
 hidden execution, embedded credentials, unsafe manifests, and unsafe package
 entries. Legitimate privileged capabilities are reported as manual-review
 signals instead of being silently ignored.
+
+Plugin sources no longer live in this repository, which keeps the published
+packages and the catalog, so the default audit walks `packages/*.piplug`.
+Source directories are still audited when a caller passes them explicitly, or
+when a `plugins/` tree exists in the checkout.
 """
 from __future__ import annotations
 
@@ -437,19 +442,21 @@ def plugin_dirs(arguments: list[str]) -> list[Path]:
                 path = ROOT / path
             result.append(path.resolve())
         return result
+    if not PLUGINS.is_dir():
+        return []
     return sorted(path for path in PLUGINS.iterdir() if path.is_dir() and not path.is_symlink() and path.name != "shared")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("plugins", nargs="*", help="optional plugin directories; defaults to all plugins/*")
-    parser.add_argument("--check-packages", action="store_true", help="also inspect every .piplug and current manifest/package presence")
+    parser.add_argument("plugins", nargs="*", help="optional plugin source directories; defaults to every plugins/* directory when that tree exists")
+    parser.add_argument("--check-packages", action="store_true", help="inspect every .piplug, and compare each package with its source when plugins/ exists")
     parser.add_argument("--fail-on-review", action="store_true", help="treat manual-review signals as failures (useful for local release sign-off)")
     args = parser.parse_args(argv)
 
     findings: list[Finding] = []
     dirs = plugin_dirs(args.plugins)
-    if not dirs:
+    if not dirs and PLUGINS.is_dir():
         add(findings, "BLOCKER", "plugins", "no plugin directories found")
     for plugin_dir in dirs:
         if not plugin_dir.is_dir() or not plugin_dir.is_relative_to(PLUGINS):
@@ -458,11 +465,13 @@ def main(argv: list[str] | None = None) -> int:
         plugin_findings, _ = audit_plugin(plugin_dir)
         findings.extend(plugin_findings)
     if args.check_packages:
-        audit_packages(findings)
+        audit_packages(findings, require_current=PLUGINS.is_dir())
 
     blockers = [finding for finding in findings if finding.severity == "BLOCKER"]
     reviews = [finding for finding in findings if finding.severity == "REVIEW"]
-    print(f"Security audit: {len(dirs)} plugin(s), {len(blockers)} blocker(s), {len(reviews)} manual-review signal(s)")
+    if not PLUGINS.is_dir():
+        print("Source audit skipped: this repository keeps packages only; every package in packages/ is audited directly.")
+    print(f"Security audit: {len(dirs)} plugin source(s), {len(blockers)} blocker(s), {len(reviews)} manual-review signal(s)")
     for finding in findings:
         print(finding.render())
     if blockers:

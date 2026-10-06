@@ -1,3 +1,0 @@
-/* Finishing pass: keep the gutter on the content scroller only. */
-html, body { scrollbar-gutter: auto; }
-.app, .content, .view { min-width: 0; }

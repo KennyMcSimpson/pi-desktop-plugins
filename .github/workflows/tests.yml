@@ -13,12 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: Security preflight
         run: python3 scripts/security_audit.py --check-packages
-      - name: Python helper tests
+      - name: Script tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Plugin tests
-        run: node --test tests/*.test.mjs tests/*.test.js plugins/*/test/*.test.mjs

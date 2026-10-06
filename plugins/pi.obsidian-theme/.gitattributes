@@ -1,6 +1,0 @@
-manifest.json text eol=lf
-main.js text eol=lf
-README.md text eol=lf
-themes/*.css text eol=lf
-renderer/*.html text eol=lf
-renderer/*.js text eol=lf
