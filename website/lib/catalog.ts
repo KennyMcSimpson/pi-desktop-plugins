@@ -53,6 +53,8 @@ export const CATALOG_URL =
 
 export const REPOSITORY_URL = "https://github.com/vastsa/pi-desktop-plugins";
 
+export const PLUGIN_CENTER_URL = "https://plugins.aiuo.net";
+
 export const featuredIds = [
   "pi.gitlens",
   "pi.token-insights",

@@ -9,167 +9,110 @@ documentation. When the user writes in another language, reply in that language.
 
 ## Repository Purpose
 
-Official plugin marketplace repository for PI-Desktop. The PI-Desktop client
-fetches `catalog.json` from GitHub raw and installs the `.piplug` packages it
-references.
+Distribution repository for PI-Desktop plugins: the published `catalog.json`, the
+`.piplug` packages it references, the scripts that audit and refresh them, and an
+optional standalone website. The PI-Desktop client's default catalog source is the
+plugin center, `https://plugins.aiuo.net/catalog.json`.
 
-This repo is the source of truth:
+Plugin **sources are not hosted here**. The former `plugins/` tree was removed:
+sources live in their authors' repositories, and the plugin center —
+[plugins.aiuo.net](https://plugins.aiuo.net) — packs, audits, records SHA-256 and
+publishes every version from a bound source repository. It then mirrors
+`catalog.json` + `packages/` to `AIUO-Net/pi-desktop-plugins` for the GitHub backup
+channel.
 
-- `plugins/` — plugin source directories
-- `packages/` — packed `.piplug` artifacts
-- `catalog.json` — generated marketplace index (never hand-edit)
+Consequences for agents:
 
-`plugins.aiuo.net` is **live** and is the supported release channel: the
-PI-Desktop client's default catalog source is
-`https://plugins.aiuo.net/catalog.json`. Publish there — the console, or the
-publish skill over `https://plugins.aiuo.net/mcp` — which audits the source,
-records the SHA-256 and mirrors `catalog.json` + `packages/` to
-`AIUO-Net/pi-desktop-plugins` for the GitHub backup channel. A release that
-stays in this repository is still pack → rebuild catalog → commit `packages/`
-+ `catalog.json`.
+- Do not recreate `plugins/`, and do not add plugin source trees anywhere in this
+  repository.
+- Do not accept a pull request that adds plugin sources; see
+  [GitHub Pull Request Handling](#github-pull-request-handling).
+- Authoring questions (manifest schema, host API, permissions, templates, packing)
+  are answered by the host documentation, not by this repository:
+  [`docs/plugin-development.md`](https://github.com/vastsa/PI-Desktop/blob/main/docs/plugin-development.md).
 
 ## Commands
 
-No package.json / npm. Tooling is Python 3 (stdlib only) and Node.js (built-in
-test runner).
+No package.json / npm at the repository root. Tooling is Python 3 (stdlib only).
+`website/` is a separate Next.js app with its own `pnpm` setup.
 
 | Action | Command |
 |---|---|
-| Pack a plugin | `python3 scripts/pack_plugin.py plugins/<id>` |
-| Rebuild catalog | `python3 scripts/rebuild_catalog.py` |
-| Run all tests | `node --test tests/*.test.mjs` |
-| Run one test | `node --test tests/<name>.test.mjs` |
-
-Local verification requires the PI-Desktop app: **Plugins → Load dev plugin**
-and choose `plugins/<id>`; or install the packed `.piplug` via
-**Install plugin package**.
+| Security preflight (mandatory) | `python3 scripts/security_audit.py --check-packages` |
+| Refresh catalog + packages from the center | `python3 scripts/sync_catalog.py [--dry-run]` |
+| Run all tests | `python3 -m unittest discover -s tests -p 'test_*.py' -v` |
+| Run one test | `python3 -m unittest tests.test_security_audit -v` |
+| Audit an external source tree (optional) | `python3 scripts/security_audit.py /path/to/plugin-dir` |
+| Website build (optional) | `cd website && pnpm install --ignore-scripts && pnpm build` |
 
 No linter/formatter is configured.
 
-## Standard Release Flow
+## Catalog And Packages
 
-```text
-bump version in manifest.json
-→ python3 scripts/pack_plugin.py plugins/<id>
-→ python3 scripts/security_audit.py --check-packages
-→ python3 scripts/rebuild_catalog.py
-→ node --test tests/*.test.mjs
-→ commit packages/<id>-<version>.piplug + catalog.json
-→ (optionally commit manifest.json if changed)
-```
+- `catalog.json` is generated output. **Never hand-edit it.** Refresh it with
+  `scripts/sync_catalog.py`, which stages the center's catalog and packages in a temp
+  directory, rejects an empty or shrinking-to-zero catalog, and only then replaces
+  `catalog.json` + `packages/`.
+- `packages/*.piplug` are immutable published artifacts. Never repack, patch or
+  rename one in place; the preflight fails when a package's filename, manifest or
+  contents disagree.
+- The catalog keeps a single `versions` entry per plugin and its `shasum` must match
+  the package bytes.
+- A `.piplug` is a store-compressed zip; a generic zip is rejected by the installer.
 
-The catalog keeps a single `versions` entry per plugin. The current manifest
-version **must** always have a matching `packages/<id>-<version>.piplug`;
-`rebuild_catalog.py` fails otherwise. The catalog `shasum` is recomputed on
-every rebuild and must match the packed file. Plugin IDs listed in
-`UNPUBLISHED_PLUGIN_IDS` (`scripts/rebuild_catalog.py`) stay in `plugins/`
-but are omitted from `catalog.json`. Do not re-add them unless asked to relist.
+## Security Review (Mandatory)
 
-## Plugin Anatomy
+Read [SECURITY.md](SECURITY.md) before touching anything under `packages/` or
+`catalog.json`. Plugins run with user-local privileges; never approve a backdoor,
+hidden data exfiltration, credential theft, remote code loading, unexplained
+obfuscation, persistence, security-control changes, or destructive behavior without
+explicit user confirmation.
 
-```text
-plugins/<id>/
-  manifest.json      # required — identity, permissions, ui, contributions
-  main.js            # required — CJS module, onLoad()/onUnload(), global pi
-  renderer/          # optional — isolated panel UI (index.html + assets)
-  skills/            # optional — agent skill markdown
-  README.md          # shown in marketplace detail view
-```
+- Run `python3 scripts/security_audit.py --check-packages` and resolve every
+  blocker. The script is a fail-closed preflight over every shipped package; its
+  manual-review signals do not constitute approval.
+- Source review is performed by the plugin center against the tagged source and the
+  packed artifact. This repository only distributes what that review approved.
+- High-risk capabilities (filesystem writes/deletes, network, credentials, native
+  code, shell/PTY, SSH, background services, prompt injection, desktop control)
+  require two independent maintainer reviews, negative-path tests and a recorded
+  capability/data-flow review.
+- Any change to a package's permissions, contributions or file set must be
+  re-published through the center; never hand-carried into `packages/`.
 
-Plugins are fully self-contained: no shared runtime, no host-side `npm install`.
-Dependencies must be bundled. Max 50MB, no symlinks, no path traversal.
+## Plugin Manifest Reference
 
-### Manifest Requirements
-
-Every `manifest.json` **must** include:
+Needed when auditing a package or reviewing a catalog entry. Every `manifest.json`
+**must** include:
 
 - `schemaVersion`, `id`, `name`, `version`, `description`
-- `i18n` block with at minimum `en` and `zh-CN` keys, each containing:
-  - `name` — localized display name
-  - `description` — localized feature summary
-  - `safetyNotes` — plain-language risk summary for the install UI
+- `i18n` with at least `en` and `zh-CN`, each carrying a non-empty `name`,
+  `description` and `safetyNotes`
 - `author`
-- `main` — entry file (always `main.js`)
-- `permissions` — minimal set, reviewed at install time for high-risk entries
+- `main` — always `main.js`
+- `permissions` — minimal set
 - `engines.piDesktop` — minimum host version
 
-Recommended:
+Recommended: `ui.title` as `{"en": ..., "zh-CN": ...}` (a half-translated title is
+refused by the host), `categories`, `changelog`, `contributes.commands` /
+`contributes.agentTools` / `contributes.settings`.
 
-- `ui.title` as `{"en": ..., "zh-CN": ...}` so the host resolves the localized
-  panel title. When opening a panel from a command, call `pi.ui.openPanel()`
-  without a `title` option.
-- `categories` — e.g. `["productivity", "official"]`
-- `changelog` — short release notes for the current version
-- `contributes.commands` / `contributes.agentTools` / `contributes.settings`
-
-### Permission Policy
-
-Request the minimum set. High-risk permissions prompt at install time. Common
-permissions:
-
-| Permission | Use |
-|---|---|
-| `ui.panel` | Open isolated panel |
-| `ui.view` | Dock in the right work panel |
-| `fs.read.workspace` | Read project files |
-| `fs.write.workspace` | Modify project files |
-| `fs.read` / `fs.write` | User-selected directory access (gateway) |
-| `clipboard.read` / `clipboard.write` | Clipboard access |
-| `notify` | Local notifications |
-| `net.fetch` | Outbound network |
-| `shell.openExternal` | Open external links |
-| `agent.tool.register` | Expose tools to the agent |
-| `agent.prompt.inject` | Inject skill prompts |
-| `background.service` | Keep plugin process resident |
-| `usage.read` | Read aggregate local token usage |
+Permission table and the 46px panel drag-band contract live in
+[CONTRIBUTING.md](CONTRIBUTING.md); the normative contract is the host's
+[`docs/spec/07-plugins`](https://github.com/vastsa/PI-Desktop/tree/main/docs/spec/07-plugins).
 
 Agent tools are exposed with the forced prefix `plugin_<id_safe>_<tool>`.
 
-## Security Review (Mandatory)
-Read [SECURITY.md](SECURITY.md) before reviewing or adding a plugin. Plugins run with user-local privileges; never approve a backdoor, hidden data exfiltration, credential theft, remote code loading, unexplained obfuscation, persistence, security-control changes, or destructive behavior without explicit user confirmation.
-Every new plugin and behavior-changing release requires a complete source and packed-artifact review. Classify the highest risk capability; high-risk plugins (filesystem writes/deletes, network, credentials, native code, shell/PTY, SSH, background services, prompt injection, or desktop control) require two independent maintainer reviews and negative-path tests.
-Run `python3 scripts/security_audit.py --check-packages` and resolve every blocker. The script is only a fail-closed preflight: its manual-review signals do not constitute approval. Verify permissions, data flow, path/symlink boundaries, user confirmations, dependency/native-binary provenance, package contents, and catalog SHA-256.
-### Runtime API
-
-`main.js` runs in the plugin process with global `pi`:
-
-- `pi.plugin.getSettings()` / `getDataPath()` / `getId()`
-- `pi.commands.register()` / `unregister()`
-- `pi.ui.openPanel()` / `showToast()`
-- `pi.agent.registerTool()` / `unregisterTool()`
-- Permission-gated `fs` / `clipboard` / `net` / `shell` APIs
-
-`onUnload` must unregister everything `onLoad` registered.
-
-### Appearance Adapter
-
-Canonical source: `plugins/shared/appearance/` (not shipped in packages).
-Copy both files into each plugin's `renderer/`:
-
-- `appearance-boot.js` — synchronous, in `<head>`. Replays cached appearance
-  from localStorage to avoid a flash on open.
-- `appearance.js` — end of `<body>`. Pulls `bridge.invoke("app.getAppearance")`
-  and subscribes to `bridge.on("appearance:changed")`, re-applying live.
-- CSS keys off `[data-theme="dark"]` / `[data-theme="light"]`.
-
-### Host Chrome Contract
-
-PI-Desktop reserves a 46px transparent drag band at the top of every panel and
-renders a minimal three-button window-control capsule in the top-right corner.
-Plugins must not implement a second draggable titlebar. Window-level fixed or
-sticky plugin UI must start at `top: var(--pi-plugin-titlebar-height, 46px)`.
-
 ## Tests
 
-`tests/*.test.mjs` use the `node:test` runner with `node:assert/strict`. They
-load plugin source directly via `createRequire` (plugins are CJS) and assert:
+`tests/test_*.py` use `unittest` and cover the repository's own scripts:
 
-- Manifest identity, permissions, and contributions
-- Agent-tool schemas and behavior
-- Plugin-specific logic against real or synthetic fixtures
+- `test_security_audit.py` — static blockers, manifest/package checks and a shipped
+  package passing the preflight. Fixtures must be created in temp directories.
+- `test_sync_catalog.py` — catalog validation, staging and fail-closed rollback.
 
-When adding a plugin or changing a plugin's manifest, the corresponding test
-must assert the exact permission list and version.
+There are no plugin source tests here any more; plugin tests live with the plugin,
+in its own repository.
 
 ## Commit Format
 
@@ -183,68 +126,65 @@ Allowed types:
 feat fix docs test chore refactor perf build ci
 ```
 
-Scope is the plugin id (without `plugins/` prefix). Examples:
-
-```text
-feat(pi.gitlens): add stash view
-fix(pi.ssh-manager): reject shell metacharacters in host field
-chore: pack pi.goal-x 0.1.1 and rebuild catalog
-```
-
-Requirements:
-
-- English only
-- Concise, imperative description
-- One logical change per commit
+Scope is the affected area, for example `catalog`, `security-audit`, `website`,
+`docs`. Requirements: English only, concise and imperative, one logical change per
+commit.
 
 ## GitHub Issue Handling
 
-When the user provides a GitHub issue URL (or an unambiguous issue number for
-this repository), treat it as an intake gate. Do not start implementation until
-the reported problem has been independently verified.
+When the user provides a GitHub issue URL (or an unambiguous issue number for this
+repository), treat it as an intake gate. Do not start implementation until the
+reported problem has been independently verified.
 
 1. Fetch the issue (title, body, labels, comments, and state).
-2. Decide whether the claim is real in the current codebase:
-   - Bug: reproduce it, or show concrete code/spec evidence that it exists.
-   - Feature or improvement: confirm the requested behavior is actually missing
-     or incomplete, and in scope.
-3. If the problem does **not** exist: comment with verification evidence, close
-   when the conclusion is clear.
-4. If the problem **does** exist: implement the smallest coherent fix, commit,
-   then comment and close.
+2. Decide whether the claim is real against this repository:
+   - a package/catalog/website/script defect: reproduce it, or show concrete
+     evidence that it exists;
+   - a plugin behavior bug or an authoring question: out of scope here — the
+     plugin's own repository and the plugin center own it.
+3. If the problem does **not** exist, or is out of scope: comment with verification
+   evidence and the correct destination (`https://plugins.aiuo.net` for plugin
+   issues), then close when the conclusion is clear.
+4. If the problem does exist and is in scope: implement the smallest coherent fix,
+   commit, then comment and close.
 5. Write the issue comment in the issue's language. Repository code, docs, and
    commits stay English.
-6. An issue link authorizes commenting on and closing **that** issue. It does
-   not authorize a git push. Remote publishing remains opt-in.
+6. An issue link authorizes commenting on and closing **that** issue. It does not
+   authorize a git push.
 
 ## GitHub Pull Request Handling
 
-When the user provides a GitHub pull request URL (or an unambiguous pull request
-number), review the principle first. Do not discard the contributor's work.
+This repository no longer accepts plugin sources, so the default outcome for a PR
+that adds `plugins/<id>/` is **close, do not merge**.
 
 1. Fetch the pull request (title, body, files, commits, comments, checks).
-2. If the principle is sound: merge **that** pull request, preserving commits.
-   Completeness gaps (tests, i18n, style) are follow-up after merge.
-3. If the principle is not sound or a harm blocker exists: do not merge.
-   Comment with evidence. Do not silently reimplement.
-4. Write the pull request comment in the pull request's language. Repository
-   code, docs, and commits stay English.
-5. A pull request link authorizes reviewing, commenting on, and merging **that**
-   pull request. It does not authorize force-push or publishing unrelated work.
+2. Classify it:
+   - **adds plugin sources or hand-edits `catalog.json`** — do not merge. Comment
+     with the publish path (build the plugin in your own repository, tag it, bind the
+     repository and submit the version at [plugins.aiuo.net](https://plugins.aiuo.net),
+     or run the publishing skill `https://plugins.aiuo.net/skill.md` over MCP), keep
+     the contributor's branch intact, and close.
+   - **fixes the distribution side** (package, catalog data, scripts, tests, website,
+     docs) — review the principle first; if it is sound, merge **that** pull request,
+     preserving commits. Completeness gaps are follow-up after merge.
+   - **has a harm blocker** — do not merge; comment with evidence.
+3. Never silently reimplement a contributor's work.
+4. Write the pull request comment in the pull request's language. Repository code,
+   docs, and commits stay English.
+5. A pull request link authorizes reviewing, commenting on, and closing or merging
+   **that** pull request. It does not authorize force-push or publishing unrelated
+   work.
 
 ## Completion Checklist
 
 Before reporting done:
 
-- [ ] `manifest.json` has complete `i18n` (en + zh-CN: name, description, safetyNotes)
-- [ ] `ui.title` is bilingual `{en, zh-CN}` (if panel plugin)
-- [ ] Permission set is minimal
-- [ ] `python3 scripts/pack_plugin.py plugins/<id>` succeeds
-- [ ] `python3 scripts/rebuild_catalog.py` succeeds
-- [ ] `node --test tests/*.test.mjs` passes (or new test added)
 - [ ] `python3 scripts/security_audit.py --check-packages` passes with zero blockers
-- [ ] High-risk changes have two independent maintainer approvals and a recorded capability/data-flow review
-- [ ] Package sha256 in catalog matches the `.piplug`
+- [ ] `python3 -m unittest discover -s tests -p 'test_*.py' -v` passes (or a test was added)
+- [ ] `catalog.json` was not hand-edited; package files were not modified in place
+- [ ] `plugins/` was not recreated and no plugin source was added
+- [ ] No dangling references to removed scripts (`pack_plugin.py`,
+      `rebuild_catalog.py`) or to `plugins/` remain in docs, website, tests or CI
 - [ ] No secrets, local data, or unrelated changes are included
 - [ ] All logical changes committed with conventional format
 - [ ] Remote publishing only if explicitly requested
@@ -253,8 +193,8 @@ Before reporting done:
 
 Report:
 
-- What changed (plugin id, version, files)
-- Pack and catalog result (sha256, size)
+- What changed (files, and the plugin/catalog entries affected)
+- Audit result (blockers) and the package/catalog delta
 - Test result
 - Commit hash and message
 - Push target and result, or confirmation that nothing was pushed

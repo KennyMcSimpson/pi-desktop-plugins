@@ -3,6 +3,10 @@
 The Vercel-ready marketplace and landing page for the PI-Desktop plugin
 catalog.
 
+Plugin sources are not hosted in this repository. Authoring and releasing happen
+on the plugin center, <https://plugins.aiuo.net>; this site only renders the
+catalog and links every plugin to its center page.
+
 ## Local development
 
 ```bash
@@ -56,4 +60,8 @@ pnpm start
 - `/` — landing page
 - `/plugins` — searchable and filterable catalog
 - `/plugins/<id>` — plugin details, permissions, README and package download
-- `/docs` — plugin author quick start and contribution link
+- `/docs` — plugin author quick start and a link to the plugin center
+
+The page copy points authors at the plugin center: `/docs` starts from the
+built-in templates and the devkit CLI (`pi-plugin init/check/pack`) and links
+straight to the center, where versions are submitted.

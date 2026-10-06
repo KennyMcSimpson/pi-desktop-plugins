@@ -1,9 +1,11 @@
 # Plugin security review policy
 
-This repository publishes code that runs inside PI-Desktop with the user's
-local privileges. A plugin is not trusted merely because it is listed in this
-repository, and a green test run is not proof that a plugin has no backdoor.
-Security review is therefore a release gate, not optional documentation.
+This repository distributes plugin packages that run inside PI-Desktop with the
+user's local privileges. A plugin is not trusted merely because it appears in the
+catalog, and a green test run is not proof that a plugin has no backdoor. Source
+review is therefore a release gate performed on the plugin center
+(https://plugins.aiuo.net) against the tagged source and the packed artifact; this
+repository distributes only what that gate approved.
 
 ## Non-negotiable blockers
 
@@ -76,10 +78,11 @@ Before approving a new plugin or a release that changes behavior:
    input/output, timeouts, process cleanup, unload/reload, and network failure.
    Use temporary fixtures only; never run destructive tests against a real
    workspace, account, host, or credential.
-7. **Inspect the artifact.** Run the security preflight, pack the plugin, list
-   the `.piplug` contents, check for symlinks/path traversal/secrets, verify the
-   manifest in the package, and verify the catalog SHA-256. Review source and
-   packed content, not just the PR diff.
+7. **Inspect the artifact.** Run the security preflight, list the `.piplug`
+   contents, check for symlinks/path traversal/secrets, verify the manifest inside
+   the package, and verify the catalog SHA-256. For a package that already
+   shipped, compare it against the tagged source recorded on the plugin center.
+   Review the packed content, not just a diff.
 8. **Record the decision.** The PR description must include the risk tier,
    permissions matrix, data-flow destinations, commands run, findings and
    mitigations, dependency/native-binary provenance, and the names of the
@@ -88,14 +91,17 @@ Before approving a new plugin or a release that changes behavior:
 
 ## Automated preflight
 
-Run this before every PR and release:
+Run this before any catalog or package change lands here:
 
 ```bash
-python3 scripts/pack_plugin.py plugins/<id>
+python3 scripts/sync_catalog.py --dry-run
 python3 scripts/security_audit.py --check-packages
-python3 scripts/rebuild_catalog.py
-node --test tests/*.test.mjs
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
+
+Source-side gates — scaffolding, `pi-plugin check`, `pi-plugin pack` and the
+plugin's own tests — run in the plugin's repository, and the plugin center runs
+them again before it publishes a version.
 `security_audit.py` is deliberately fail-closed for high-confidence findings:
 malformed security metadata, duplicate or undeclared manifest surfaces,
 symlinks/path traversal, hard-coded secrets, remote executable scripts,
@@ -109,9 +115,11 @@ known blocker; it never replaces the manual review above.
 
 Any change to permissions, activation events, agent tools, skills, network
 allowlists, native/vendor files, data destinations, or destructive behavior
-requires a new security review. A package must be rebuilt after source or
-manifest changes. Never hand-edit `catalog.json`, and never publish an artifact
-whose hash does not match the generated catalog.
+requires a new security review and a new version published through the plugin
+center. A package must be rebuilt from the tagged source after any source or
+manifest change — never patched in place under `packages/`. Never hand-edit
+`catalog.json`, and never distribute an artifact whose hash does not match the
+catalog.
 
 ## Reporting a vulnerability
 

@@ -1,49 +1,62 @@
-# Contributing plugins to PI-Desktop
+# Contributing to PI-Desktop plugins
 
-This repository holds the plugin sources, the tooling that builds them, and the packages and catalog
-this repository serves.
+This repository holds the published plugin catalog (`catalog.json`), the packages it
+references (`packages/*.piplug`) and the tools that keep them honest. Plugin **sources are not
+hosted here**: `plugins/` was removed, and pull requests that add plugin sources are closed.
 
-Releases are published on the plugin center:
+Where plugins are submitted now:
 
 ```text
 https://plugins.aiuo.net
 ```
 
-The center is the client's default catalog source (`https://plugins.aiuo.net/catalog.json`). It binds
-each plugin to the repository it lives in, audits the source, serves the `.piplug` packages and
-mirrors `catalog.json` + `packages/` to
+The center is the client's default catalog source (`https://plugins.aiuo.net/catalog.json`). It
+binds each plugin to the repository it lives in, audits the source and the artifact, serves the
+`.piplug` packages and mirrors `catalog.json` + `packages/` to
 [AIUO-Net/pi-desktop-plugins](https://github.com/AIUO-Net/pi-desktop-plugins) for the GitHub backup
-channel. Adding a plugin to this repository is one way in; publishing your own repository on the
-center is the other.
+channel.
 
-## Quick start
+## Submit a plugin to the plugin center
+
+1. Build the plugin in **your own repository** — see [Before you publish](#before-you-publish).
+2. Push it and tag the version (`v0.4.8`). The tag, or a commit SHA, becomes the `sourceRef` the
+   source review reads.
+3. Bind that repository to the plugin through the console's source binding (a GitHub App grant).
+   The binding is what the review and the catalog's source pin follow, so it cannot be swapped
+   afterwards without an operator.
+4. Submit the version. Two routes reach the same backend:
+   - **Console** — sign in at [plugins.aiuo.net](https://plugins.aiuo.net) → **My Plugins** →
+     **Create plugin**, then submit later versions from the plugin's own page.
+   - **AI client** — follow the publishing skill, `https://plugins.aiuo.net/skill.md`, which drives
+     the MCP endpoint `https://plugins.aiuo.net/mcp` with a personal access token from
+     [Console → Tokens](https://plugins.aiuo.net/console/publish/tokens).
+5. The center audits the source, a maintainer approves, and the version goes live with its
+   SHA-256 and install counts.
+
+`pi.` and `demo.` are reserved namespaces and need an operator to release.
+
+## Before you publish
+
+Start from a built-in template: **Plugins → ⋯ → New plugin from template** (`panel-basic`,
+`agent-tool-basic`, `skill-pack`, `full-demo`). From a PI-Desktop checkout you can use the devkit
+CLI instead:
 
 ```bash
-# 1) fork + clone
-git clone https://github.com/<you>/pi-desktop-plugins.git
-cd pi-desktop-plugins
-
-# 2) copy the practical template
-cp -R plugins/demo.workspace-summary plugins/my.plugin-id
-
-# 3) edit manifest + code
-#    - change id/name/version/description
-#    - implement main.js
-#    - optional renderer/index.html
-
-# 4) pack
-python3 scripts/pack_plugin.py plugins/my.plugin-id
-
-# 5) run the release gates
-python3 scripts/security_audit.py --check-packages
-
-# 6) open a PR to vastsa/pi-desktop-plugins, or publish your own repository on the plugin center
+pnpm --filter @pi-desktop/plugin-devkit... build
+pnpm pi-plugin init panel-basic ../my.plugin-id
+pnpm pi-plugin check ../my.plugin-id     # manifest, permissions, referenced files, size
+pnpm pi-plugin pack ../my.plugin-id      # dist/my.plugin-id-0.1.0.piplug + SHA-256
 ```
 
-## Plugin layout
+Then verify in the host: **Plugins → Load dev plugin** while developing, and
+**Install plugin package** with the packed `.piplug` before you release. Confirm the command
+palette entry, the panel, the agent tool (forced prefix `plugin_<id_safe>_<tool>`), and that
+undeclared or ungranted permissions fail cleanly.
+
+### Plugin layout
 
 ```text
-plugins/<id>/
+<your-plugin-repository>/
   manifest.json      # required
   main.js            # required entry
   renderer/          # optional isolated panel UI
@@ -63,11 +76,13 @@ plugins/<id>/
   "i18n": {
     "en": {
       "name": "My Plugin",
-      "description": "What it does"
+      "description": "What it does",
+      "safetyNotes": "Reads nothing outside its own panel."
     },
     "zh-CN": {
       "name": "我的插件",
-      "description": "插件功能简介"
+      "description": "插件功能简介",
+      "safetyNotes": "不读取面板之外的内容。"
     }
   },
   "author": "your-name",
@@ -77,16 +92,14 @@ plugins/<id>/
 }
 ```
 
-Use BCP-47 locale keys in `i18n`. The marketplace discovers available locale
-options from these keys, so additional locales do not require a website code
-change. The website falls back to English when its own UI copy is not yet
-translated, while plugin metadata falls back to English, Simplified Chinese,
-then the base manifest fields.
+`i18n` needs `en` and `zh-CN`, each with a non-empty `name`, `description` and `safetyNotes`.
+Use BCP-47 locale keys; additional locales need no website change. The catalog falls back per
+field — a half-finished block ships as mixed language rather than as an error, so finish it before
+you submit.
 
 ### Recommended fields for marketplace quality
 
 - `categories`: e.g. `["productivity", "official"]`
-- `i18n`: localized `name`, `description`, `safetyNotes` and optional `readmeMarkdown`
 - `changelog`: short release notes for the current version
 - `safetyNotes`: plain-language risk summary
 - `ui.panel`: isolated panel html entry
@@ -94,8 +107,7 @@ then the base manifest fields.
 
 ### Panel title and host chrome compatibility
 
-Panel titles must provide both English and Simplified Chinese so PI-Desktop can
-follow the active application language:
+Every localized slot must carry both locales — a half-translated title is refused by the host:
 
 ```json
 {
@@ -110,42 +122,19 @@ follow the active application language:
 ```
 
 Do not hard-code a replacement title when opening the panel from a command. Use
-`pi.ui.openPanel()` without a `title` option so the host can resolve the
-localized manifest title. PI-Desktop reserves exactly a 46px transparent drag
-band at the top of every panel and renders a minimal three-button window-control
-capsule in the top-right corner. The band is intentionally not clickable; the
-host may show a development hint for it. Normal-flow plugin content is offset
-below the band automatically. Plugins own every other visible part of the
-panel, and must not implement a second draggable window titlebar. A plugin
-element that is fixed or sticky to the window edge must begin at
-`top: var(--pi-plugin-titlebar-height, 46px)`; sticky elements inside their own
-scrollable views can keep their local `top: 0` behavior.
-
-## Local verification in PI-Desktop
-
-Before opening a PR:
-
-1. Open PI-Desktop → **Plugins**
-2. Use **Load dev plugin** and choose `plugins/<id>`
-3. Confirm:
-   - command palette entry works
-   - panel opens (if declared)
-   - agent tool appears with forced prefix `plugin_<id_safe>_<tool>`
-   - undeclared permissions fail cleanly
-
-Or install the packed artifact:
-
-1. `python3 scripts/pack_plugin.py plugins/<id>`
-2. PI-Desktop → **Install .piplug**
-3. Review permissions carefully
+`pi.ui.openPanel()` without a `title` option so the host can resolve the localized manifest title.
+PI-Desktop reserves exactly a 46px transparent drag band at the top of every panel and renders a
+minimal three-button window-control capsule in the top-right corner. Normal-flow plugin content is
+offset below the band automatically. Plugins own every other visible part of the panel, and must
+not implement a second draggable window titlebar. A plugin element that is fixed or sticky to the
+window edge must begin at `top: var(--pi-plugin-titlebar-height, 46px)`.
 
 ## Packaging rules
 
 - Root of the package must contain `manifest.json`
-- No symlinks
-- No path traversal
-- Prefer store-compressed `.piplug`
-- Max package size: 50MB
+- No symlinks, no path traversal
+- Store-compressed `.piplug` — a package made with a generic ZIP tool is rejected
+- Max 50 MB and 2,000 files
 - Do not expect host-side `npm install` at install time; bundle dependencies yourself
 
 ## Permission policy
@@ -155,6 +144,7 @@ Request the minimum set:
 | Permission | Use |
 |---|---|
 | `ui.panel` | Open isolated panel |
+| `ui.view` | Dock in the right work panel |
 | `fs.read.workspace` | Read project files |
 | `fs.write.workspace` | Modify project files |
 | `clipboard.read` / `clipboard.write` | Clipboard access |
@@ -162,45 +152,52 @@ Request the minimum set:
 | `net.fetch` | Outbound network |
 | `shell.openExternal` | Open external links |
 | `agent.tool.register` | Expose tools to the agent |
+| `agent.prompt.inject` | Inject skill prompts |
+| `background.service` | Keep the plugin process resident |
 | `usage.read` | Read aggregate local token usage without message content |
 
-High-risk permissions are reviewed in the install UI. Auto-update will not silently expand permissions.
+High-risk permissions are reviewed in the install UI. Auto-update will not silently expand
+permissions.
 
 ## Security review gate
-Read [SECURITY.md](./SECURITY.md) before submitting a plugin. This repository does not accept backdoors, hidden data collection or exfiltration, remote code loading, unexplained obfuscation, hard-coded credentials, persistence, security-control changes, or destructive operations without explicit user confirmation.
-Run the fail-closed preflight after packing:
+
+Read [SECURITY.md](./SECURITY.md) before submitting a plugin. Neither this repository nor the
+plugin center accepts backdoors, hidden data collection or exfiltration, remote code loading,
+unexplained obfuscation, hard-coded credentials, persistence, security-control changes, or
+destructive operations without explicit user confirmation.
+
+The release gate runs on the plugin center against the tagged source and the packed artifact. For
+filesystem writes/deletes, network, credentials, native binaries, shell/PTY, SSH, background
+services, prompt injection, or desktop control, include a capability/data-flow matrix,
+negative-path tests, dependency provenance, and two independent maintainer approvals. A passing
+script or test suite is not proof that a plugin has no backdoor.
+
+## Contributing to this repository
+
+Accepted here — everything about the distribution side:
+
+- a `.piplug` in `packages/` that fails to install, has a wrong size or hash, or contains the wrong
+  files
+- a stale, wrong or missing entry in `catalog.json`
+- a bug in `scripts/`, `tests/` or `website/`
+- a documentation mistake
+
+Not accepted here:
+
+- pull requests that add plugin sources under `plugins/` — they are closed with a pointer to the
+  plugin center, where the same review happens against your own repository
+- hand-edited `catalog.json`: it is generated output
+
+Local checks before opening a pull request:
+
 ```bash
 python3 scripts/security_audit.py --check-packages
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 scripts/sync_catalog.py --dry-run
 ```
-Resolve every blocker. Manual-review signals are expected for legitimate high-risk capabilities, but they still require maintainer sign-off. For filesystem writes/deletes, network, credentials, native binaries, shell/PTY, SSH, background services, prompt injection, or desktop control, include a capability/data-flow matrix, negative-path tests, dependency provenance, and two independent maintainer approvals. Review both `plugins/<id>/` and the `.piplug` contents; a passing script or test suite is not proof that a plugin has no backdoor.
-## PR checklist
 
-- [ ] Unique `id`
-- [ ] Semantic `version`
-- [ ] README explains what/why/permissions
-- [ ] `python3 scripts/pack_plugin.py ...` succeeds
-- [ ] `python3 scripts/rebuild_catalog.py` updated `catalog.json`
-- [ ] Package sha256 in catalog matches the `.piplug`
-- [ ] Tested via Load dev plugin and/or Install .piplug
-- [ ] No secrets in source or package
-- [ ] `python3 scripts/security_audit.py --check-packages` passes with zero blockers
-- [ ] High-risk changes have two independent maintainer approvals and a recorded capability/data-flow review
+## Reference material
 
-## After merge
-
-Merging adds the plugin to this repository, its packages and its catalog — it does not by itself
-ship a release to users. Releases live on the plugin center:
-
-1. Create the plugin (or submit a new version) on [plugins.aiuo.net](https://plugins.aiuo.net) —
-   see [Publish a Plugin](./README.md#publish-a-plugin) in the README
-2. Push the plugin's own repository and tag the version; that tag is the `sourceRef` the review reads
-3. After the audit and approval the version appears in `https://plugins.aiuo.net/catalog.json`,
-   which is what PI-Desktop's **Plugins → Marketplace** loads
-
-## Template recommendation
-
-Start from:
-
-- `plugins/demo.workspace-summary` for a real productivity plugin
-- `plugins/demo.hello` for the smallest command/panel/tool sample
-- `plugins/demo.workspace-notes` for high-risk capability demos
+- Host authoring guide: [`docs/plugin-development.md`](https://github.com/vastsa/PI-Desktop/blob/main/docs/plugin-development.md)
+- Example plugins: [PI-Desktop `examples/plugins`](https://github.com/vastsa/PI-Desktop/tree/main/examples/plugins)
+- Plugin system specs: [PI-Desktop `docs/spec/07-plugins`](https://github.com/vastsa/PI-Desktop/tree/main/docs/spec/07-plugins)

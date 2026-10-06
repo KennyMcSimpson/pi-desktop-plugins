@@ -1,73 +1,52 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+`AGENTS.md` is the authoritative rule set; this file is the short version.
 
 ## Repository purpose
 
-Official plugin marketplace repository for PI-Desktop (a desktop environment app). The PI-Desktop client's default catalog source is the plugin center, `https://plugins.aiuo.net/catalog.json`, with GitHub mirrors as fallbacks. This repo holds plugin sources in `plugins/`, packed artifacts in `packages/` and its own generated index `catalog.json`.
+Distribution repository for PI-Desktop plugins: the published `catalog.json`, the `.piplug`
+packages it references (`packages/`), the scripts that refresh and audit them (`scripts/`), Python
+tests (`tests/`) and an optional standalone website (`website/`). The PI-Desktop client's default
+catalog source is the plugin center, `https://plugins.aiuo.net/catalog.json`.
 
-`plugins.aiuo.net` is **live** and is the supported release channel: create the plugin or submit the version on the center (console, or the publish skill over `https://plugins.aiuo.net/mcp`), which audits the source, records the SHA-256 and mirrors `catalog.json` + `packages/` to `AIUO-Net/pi-desktop-plugins`. A release that stays in this repository is: pack → rebuild catalog → commit `packages/` + `catalog.json`.
+Plugin sources are **not** hosted here. The `plugins/` tree was removed; sources live in their
+authors' repositories, and the plugin center packs, audits, records the SHA-256 and publishes every
+version, then mirrors `catalog.json` + `packages/` to `AIUO-Net/pi-desktop-plugins`. Do not
+recreate `plugins/`, do not add plugin sources, and do not merge pull requests that do. Authoring
+questions belong to the host guide:
+`https://github.com/vastsa/PI-Desktop/blob/main/docs/plugin-development.md`.
 
 ## Commands
 
-No package.json / npm. Tooling is Python 3 (stdlib only) and Node.js (built-in test runner).
+Tooling is Python 3 (stdlib only) at the root; `website/` is a separate Next.js app using pnpm.
 
-- **Pack a plugin**: `python3 scripts/pack_plugin.py plugins/<id>` — writes `packages/<id>-<version>.piplug` (version read from `manifest.json`), prints sha256 and size.
-- **Rebuild catalog**: `python3 scripts/rebuild_catalog.py` — regenerates `catalog.json` from `plugins/*/manifest.json` + `packages/*.piplug`; exits with an error if a plugin has no matching package. `catalog.json` is generated output — never hand-edit it.
-- **Run tests**: `node --test tests/`, or a single file e.g. `node --test tests/gitlens.test.mjs`.
-- **Local verification** requires the PI-Desktop app: **Plugins → Load dev plugin** and choose `plugins/<id>`; or install the packed `.piplug` via **Install .piplug**.
+- **Security preflight (mandatory)**: `python3 scripts/security_audit.py --check-packages` — audits
+  every `.piplug` in `packages/` (structure, manifest, filename/manifest agreement, permissions).
+  Zero blockers is required; manual-review signals still need maintainer judgement. It also audits
+  a plugin source directory you pass explicitly.
+- **Refresh from the center**: `python3 scripts/sync_catalog.py [--dry-run]` — stages the center's
+  catalog and packages in a temp directory, rejects an empty or shrinking-to-zero catalog, then
+  replaces `catalog.json` + `packages/`.
+- **Tests**: `python3 -m unittest discover -s tests -p 'test_*.py' -v`.
+- **Website** (optional): `cd website && pnpm install --ignore-scripts && pnpm build`.
 - No linter/formatter is configured.
 
-Standard release flow for a plugin change: bump `version` in `manifest.json` → `python3 scripts/pack_plugin.py plugins/<id>` → `python3 scripts/rebuild_catalog.py` → run tests. Commit messages use conventional format with the plugin id as scope (e.g. `feat(pi.gitlens): ...`, `fix(super-domain-man): ...`).
+`catalog.json` is generated output — never hand-edit it. `packages/*.piplug` are immutable published
+artifacts — never repack, patch or rename one in place.
 
-## Architecture
+## Security review
 
-### Plugin anatomy — `plugins/<id>/`
+Read `SECURITY.md`. No backdoors, hidden data exfiltration, credential theft, remote code loading,
+unexplained obfuscation, persistence, permission-gate bypasses, or destructive behavior without
+explicit user confirmation. The source review itself happens on the plugin center against the tagged
+source and the packed artifact; this repository distributes what that review approved. Treat
+filesystem writes/deletes, network, credentials, native binaries, shells/PTY, SSH, background
+services, `agent.prompt.inject` and `desktop.control` as high risk.
 
-- `manifest.json` (required) — identity, permissions, `ui.panel`, contributions
-- `main.js` (required) — CommonJS module exporting `onLoad()` / `onUnload()`, runs in the plugin process with a global `pi` runtime API
-- `renderer/` (optional) — isolated panel UI (`index.html` + assets)
-- `skills/` (optional) — agent skill markdown
-- `README.md` — shown in the marketplace detail view
+## Commits
 
-Plugins are **fully self-contained**: no shared runtime with the host or other plugins at run time, and no host-side `npm install` — dependencies must be bundled into the package. Packing constraints: package root must contain `manifest.json`, no symlinks, no path traversal, max 50MB.
-
-### Manifest essentials
-
-- `ui.title` must be bilingual `{"en": ..., "zh-CN": ...}` so the host follows the app language. When opening a panel from a command, call `pi.ui.openPanel()` without a `title` option so the host resolves the localized manifest title.
-- `contributes.commands` / `contributes.agentTools` / `contributes.settings` declare what `main.js` registers.
-- Request the minimum permission set; high-risk permissions prompt at install time and auto-update never silently expands them. Common permissions: `ui.panel`, `fs.read.workspace`, `fs.write.workspace`, `clipboard.read`/`write`, `notify`, `net.fetch`, `shell.openExternal`, `agent.tool.register`, `agent.prompt.inject`, `usage.read`.
-- Agent tools are exposed with the forced prefix `plugin_<id_safe>_<tool>`.
-
-### Runtime API
-
-`main.js` runs in the plugin process with global `pi`: `pi.plugin.getSettings()/getDataPath()/getId()`, `pi.commands.register/unregister()`, `pi.ui.openPanel()/showToast()`, `pi.agent.registerTool/unregisterTool()`, plus permission-gated fs/clipboard/net/shell APIs. `onUnload` must unregister everything `onLoad` registered.
-
-### Security review
-Read `SECURITY.md` before approving plugin changes. No backdoors, hidden data exfiltration, credential theft, remote code loading, unexplained obfuscation, persistence, permission-gate bypasses, or destructive behavior without explicit user confirmation is acceptable. Run `python3 scripts/security_audit.py --check-packages`; zero blockers is required, but manual-review signals still require maintainer approval.
-Treat filesystem writes/deletes, network, credentials, native binaries, shells/PTY, SSH, background services, `agent.prompt.inject`, and `desktop.control` as high risk. Require source and packed-artifact review, negative-path tests, dependency provenance, a capability/data-flow record, and two independent maintainer approvals. See `SECURITY.md` for the full procedure.
-### Appearance adapter — `plugins/shared/appearance/`
-
-Canonical source for following the host's color mode (light/dark) and locale (zh-CN/en). It is **not shipped in packages** — copy both files into each plugin's `renderer/` (all current plugins already do this):
-
-- `appearance-boot.js` — synchronous, in `<head>` before the body. Replays the last known appearance from localStorage (per-plugin cache key via `window.__APPEARANCE_CACHE_KEY`, default `pi.appearance.v1`) to avoid a flash on open; falls back to OS preference.
-- `appearance.js` — loaded at the end of `<body>`; `window.__appearance.init(window.pluginBridge)` pulls `bridge.invoke("app.getAppearance")` and subscribes to `bridge.on("appearance:changed")`, re-applying live and writing the cache. Degrades silently on hosts without the channel.
-- Panel CSS keys off `[data-theme="dark"]` / `[data-theme="light"]`; text switches via `onThemeChange` / `onLocaleChange` (or `current().locale`).
-
-PI-Desktop reserves exactly a 46px transparent, non-clickable drag band at the
-top of every panel and owns a minimal three-button window-control capsule in the
-top-right corner. The host offsets normal-flow content automatically; plugins
-own all other visible panel UI and must not implement a second draggable window
-titlebar. Window-level fixed or sticky plugin UI must start at
-`top: var(--pi-plugin-titlebar-height, 46px)`. Sticky UI inside a nested plugin
-scroll container may keep a local `top: 0` offset.
-
-### Packages & catalog
-
-- `.piplug` is a store-compressed zip written by a hand-rolled struct-packed Python zip writer in `scripts/pack_plugin.py` (no compression level, no external zip dependency).
-- `catalog.json` keeps a single `versions` entry per plugin, so the current manifest version must always have a matching `packages/<id>-<version>.piplug`; `rebuild_catalog.py` fails otherwise. IDs in `UNPUBLISHED_PLUGIN_IDS` are omitted from the catalog even if source remains.
-- The catalog `shasum` must match the packed file — it is recomputed on every rebuild.
-
-### Tests
-
-`tests/*.test.mjs` use the `node:test` runner with `node:assert/strict`. They load plugin source directly via `createRequire` (plugins are CJS) and assert manifest identity/permissions, agent-tool schemas, and behavior — e.g. `gitlens.test.mjs` spins up real temp git repositories via `git init`; `token-insights.test.mjs` builds JSONL session fixtures in temp dirs. When adding a plugin or changing a plugin's manifest, the corresponding test asserts the exact permission list and version.
+Conventional format, English, imperative, one logical change per commit:
+`chore: drop the plugin source tree and source-only tooling`,
+`docs: point plugin authoring at the plugin center`. Scope names the area (`catalog`,
+`security-audit`, `website`, `docs`).
