@@ -138,7 +138,7 @@ python3 scripts/sync_catalog.py             # 替换 catalog.json + packages/
 python3 scripts/security_audit.py --check-packages
 ```
 
-`catalog.json` 是生成物，不要手改。
+条目里的 URL 是相对路径（`packages/<id>-<version>.piplug`），按本目录声明的 `artifactBaseUrl` 解析——所以不管目录是从哪个域名取的，客户端都会去 `raw.githubusercontent.com/vastsa/pi-desktop-plugins/main/` 下载。`catalog.json` 本身是生成物，但在下一次同步之前由人工维护：原来生成它的 `plugins/` 源码已经移出了本仓库。
 
 ## 插件目录结构
 

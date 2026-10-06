@@ -170,7 +170,11 @@ python3 scripts/sync_catalog.py             # replace catalog.json + packages/
 python3 scripts/security_audit.py --check-packages
 ```
 
-`catalog.json` is generated output — never hand-edit it.
+The entry URLs are relative (`packages/<id>-<version>.piplug`) and resolve against the
+`artifactBaseUrl` this catalog declares, so a client downloads them from
+`raw.githubusercontent.com/vastsa/pi-desktop-plugins/main/` no matter which host served the
+catalog. `catalog.json` is normally generated output — until the next sync it is maintained by
+hand, because the sources it used to be generated from (`plugins/`) are gone.
 
 ## Plugin Structure
 
