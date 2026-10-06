@@ -90,7 +90,7 @@ function resolveAvailableWindowsSshCommand() {
 test("manifest declares a high-risk SSH agent surface with the smallest plugin permissions", () => {
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.id, "pi.ssh-manager");
-  assert.equal(manifest.version, "0.1.6");
+  assert.equal(manifest.version, "0.1.5");
   assert.equal(manifest.ui.panel, "renderer/index.html");
   assert.deepEqual(manifest.permissions, [
     "ui.panel",
