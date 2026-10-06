@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "pi.bianqian",
   "name": "便签",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Markdown 桌面便签：多便签管理、实时预览、任务列表勾选、荧光笔高亮与回收站。Sticky notes with Markdown preview, task lists, text highlights and recycle bin.",
   "i18n": {
     "en": {
@@ -43,7 +43,7 @@
     "agentTools": [
       {
         "name": "list_notes",
-        "description": "List all sticky notes with title, snippet, color and timestamps; deleted notes are included only when includeDeleted is true.",
+        "description": "Use when the user wants to see or review their sticky notes, e.g. \"列出我的便签\", \"看看我记过什么\", \"list my sticky notes\". Lists all sticky notes with title, snippet, color and timestamps; deleted notes appear only when includeDeleted is true.",
         "risk": "low",
         "schema": {
           "type": "object",
@@ -52,7 +52,7 @@
       },
       {
         "name": "get_note",
-        "description": "Read one sticky note's full markdown content by id.",
+        "description": "Use when the user wants the full content of one note whose id is already known, e.g. \"把那条便签的原文给我\", \"show that note in full\". Reads one sticky note's full markdown content by id; prefer search_notes when the id is unknown.",
         "risk": "low",
         "schema": {
           "type": "object",
@@ -62,7 +62,7 @@
       },
       {
         "name": "search_notes",
-        "description": "Search sticky notes by title, snippet or content (case-insensitive substring).",
+        "description": "Use when the user looks for a note by keyword or topic without an id, e.g. \"找一下我记过的关于部署的便签\", \"find the note about the deploy\". Case-insensitive substring search over title, snippet and content.",
         "risk": "low",
         "schema": {
           "type": "object",
@@ -72,7 +72,7 @@
       },
       {
         "name": "create_note",
-        "description": "Create a new sticky note with optional markdown content and color. The title is derived from the content's first heading or line.",
+        "description": "Use when the user asks to jot down, record or remember something as a sticky note, e.g. \"记一下：周五三点开会\", \"帮我记着这个地址\", \"jot this down in a note\". Not for structured todos (use pi.todo) or goals (use pi.goal-x). Creates a note with optional markdown content and color; the title derives from the first heading or line.",
         "risk": "medium",
         "schema": {
           "type": "object",
@@ -84,7 +84,7 @@
       },
       {
         "name": "update_note",
-        "description": "Update a sticky note's content, color or mode. Content changes re-derive the title automatically.",
+        "description": "Use when the user asks to edit, extend or correct an existing note, e.g. \"把那条便签补一行端口号\", \"edit the note to add the port\". Updates content, color or mode; content changes re-derive the title.",
         "risk": "medium",
         "schema": {
           "type": "object",
@@ -99,7 +99,7 @@
       },
       {
         "name": "delete_note",
-        "description": "Move a sticky note to the recycle bin (soft delete; restorable via restore_note).",
+        "description": "Use when the user asks to remove a note they no longer need, e.g. \"把这条便签删了\", \"delete the old note\". Soft-deletes to the recycle bin (restorable via restore_note), so prefer it over purge_note.",
         "risk": "medium",
         "schema": {
           "type": "object",
@@ -109,7 +109,7 @@
       },
       {
         "name": "restore_note",
-        "description": "Restore a soft-deleted sticky note from the recycle bin.",
+        "description": "Use when the user wants a recently deleted note back, e.g. \"刚才删错了一条，恢复一下\", \"restore the note I deleted\". Restores a soft-deleted note from the recycle bin.",
         "risk": "medium",
         "schema": {
           "type": "object",
@@ -119,7 +119,7 @@
       },
       {
         "name": "purge_note",
-        "description": "Permanently delete a sticky note. This cannot be undone.",
+        "description": "Use only when the user explicitly asks to permanently destroy a note, e.g. \"彻底删掉这条，不用恢复\", \"purge it permanently\". Never use for an ordinary delete request — that is delete_note. Permanently deletes and cannot be undone.",
         "risk": "high",
         "schema": {
           "type": "object",
@@ -132,7 +132,7 @@
   "permissions": ["ui.panel", "agent.tool.register", "agent.prompt.inject", "shell.openExternal"],
   "engines": { "piDesktop": ">=0.7.1" },
   "categories": ["productivity", "community"],
-  "changelog": "Release 0.1.5: reserves space for the host window-control capsule so top-right panel actions no longer overlap it. Release 0.1.4: gives the panel an explicit full-height page surface and keeps the host window-control capsule synchronized with live theme changes. Release 0.1.3: migrates the panel to v3 paint-through chrome so top-band controls remain clickable without the legacy 46px blank area. Release 0.1.2: refreshes the sticky-notes panel chrome, controls, focus states, dialogs, and compact responsive spacing. Release 0.1.1: adapts the panel to PI-Desktop's cross-platform 46px host drag band and minimal three-button window-control capsule. First release: multiple notes, Markdown preview/editing, task lists, highlights, image paste, and recycle bin.",
+  "changelog": "Release 0.1.6: leads every agent-tool description with explicit when-to-use trigger conditions and example phrasings (including Chinese), so the agent picks the right sticky-note tool from the user's goal; purge_note now states it must never serve an ordinary delete request. Release 0.1.5: reserves space for the host window-control capsule so top-right panel actions no longer overlap it. Release 0.1.4: gives the panel an explicit full-height page surface and keeps the host window-control capsule synchronized with live theme changes. Release 0.1.3: migrates the panel to v3 paint-through chrome so top-band controls remain clickable without the legacy 46px blank area. Release 0.1.2: refreshes the sticky-notes panel chrome, controls, focus states, dialogs, and compact responsive spacing. Release 0.1.1: adapts the panel to PI-Desktop's cross-platform 46px host drag band and minimal three-button window-control capsule. First release: multiple notes, Markdown preview/editing, task lists, highlights, image paste, and recycle bin.",
   "safetyNotes": "便签数据仅存于插件自己的 settings 中，不访问工作区或网络；点击便签内的外部链接会打开系统浏览器。",
   "activationEvents": ["onCommand:bianqian.open", "onCommand:bianqian.new", "onStartup"]
 }
