@@ -125,6 +125,16 @@ def plan_downloads(src: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
+def required_packages_match(src: dict[str, Any], packages_dir: Path) -> bool:
+    for item in plan_downloads(src):
+        if item["yanked"]:
+            continue
+        local = packages_dir / item["name"]
+        if not local.is_file() or sha256_file(local).lower() != item["shasum"]:
+            return False
+    return True
+
+
 def load_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -143,18 +153,13 @@ def sync(root: Path, source: str, dry_run: bool) -> int:
     validate_catalog(mirrored)
 
     existing = load_json(root / "catalog.json")
+    if existing and canonical(existing) == canonical(mirrored):
+        if required_packages_match(src, root / "packages"):
+            print("catalog unchanged (ignoring generatedAt/catalogId/updatedAt)")
+            return 0
+
     packages_dir = root / "packages"
     wanted = plan_downloads(src)
-    if existing and canonical(existing) == canonical(mirrored) and all(
-        item["yanked"] or (
-            (packages_dir / item["name"]).is_file()
-            and sha256_file(packages_dir / item["name"]).lower() == item["shasum"]
-        )
-        for item in wanted
-    ):
-        print("catalog unchanged (ignoring generatedAt/catalogId/updatedAt)")
-        return 0
-
     staging = Path(tempfile.mkdtemp(prefix="pi-mirror-"))
     staged_packages = staging / "packages"
     staged_packages.mkdir()
