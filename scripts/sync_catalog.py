@@ -143,12 +143,18 @@ def sync(root: Path, source: str, dry_run: bool) -> int:
     validate_catalog(mirrored)
 
     existing = load_json(root / "catalog.json")
-    if existing and canonical(existing) == canonical(mirrored):
+    packages_dir = root / "packages"
+    wanted = plan_downloads(src)
+    if existing and canonical(existing) == canonical(mirrored) and all(
+        item["yanked"] or (
+            (packages_dir / item["name"]).is_file()
+            and sha256_file(packages_dir / item["name"]).lower() == item["shasum"]
+        )
+        for item in wanted
+    ):
         print("catalog unchanged (ignoring generatedAt/catalogId/updatedAt)")
         return 0
 
-    packages_dir = root / "packages"
-    wanted = plan_downloads(src)
     staging = Path(tempfile.mkdtemp(prefix="pi-mirror-"))
     staged_packages = staging / "packages"
     staged_packages.mkdir()
@@ -157,7 +163,7 @@ def sync(root: Path, source: str, dry_run: bool) -> int:
         for item in wanted:
             dest = staged_packages / item["name"]
             local = packages_dir / item["name"]
-            if local.exists() and sha256_file(local).lower() == item["shasum"]:
+            if local.is_file() and sha256_file(local).lower() == item["shasum"]:
                 shutil.copy2(local, dest)
                 print(f"keep {item['name']}")
                 continue
